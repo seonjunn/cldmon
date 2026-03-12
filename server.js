@@ -12,7 +12,6 @@ puppeteer.use(StealthPlugin());
 // Config
 // ---------------------------------------------------------------------------
 const CONFIG_FILE = path.join(__dirname, "config.json");
-const HISTORY_FILE = path.join(__dirname, "data", "history.jsonl");
 const FETCH_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 
 function loadConfig() {
@@ -110,27 +109,48 @@ async function fetchAccountUsage(account) {
 }
 
 // ---------------------------------------------------------------------------
-// History storage (JSONL file, one snapshot per line)
+// History storage (one JSONL file per day: data/history-YYYY-MM-DD.jsonl)
 // ---------------------------------------------------------------------------
 
+const HISTORY_DIR = path.join(__dirname, "data");
+
+function historyFilePath(date) {
+  const d = date ?? new Date();
+  const ymd = d.toISOString().slice(0, 10);
+  return path.join(HISTORY_DIR, `history-${ymd}.jsonl`);
+}
+
 function appendHistory(snapshot) {
-  fs.mkdirSync(path.dirname(HISTORY_FILE), { recursive: true });
-  fs.appendFileSync(HISTORY_FILE, JSON.stringify(snapshot) + "\n");
+  fs.mkdirSync(HISTORY_DIR, { recursive: true });
+  fs.appendFileSync(historyFilePath(), JSON.stringify(snapshot) + "\n");
 }
 
 function readHistory(rangeMs) {
-  if (!fs.existsSync(HISTORY_FILE)) return [];
+  const now = Date.now();
+  const cutoff = now - rangeMs;
 
-  const cutoff = Date.now() - rangeMs;
-  const lines = fs.readFileSync(HISTORY_FILE, "utf8").trim().split("\n").filter(Boolean);
+  // Collect the set of dates (UTC) that overlap with the range.
+  const dates = [];
+  for (let t = cutoff; t <= now + 86400000; t += 86400000) {
+    dates.push(new Date(t).toISOString().slice(0, 10));
+  }
+  // Deduplicate (the loop can produce duplicates at boundaries).
+  const uniqueDates = [...new Set(dates)];
 
   const result = [];
-  for (const line of lines) {
-    try {
-      const snap = JSON.parse(line);
-      if (snap.timestamp >= cutoff) result.push(snap);
-    } catch {}
+  for (const ymd of uniqueDates) {
+    const file = path.join(HISTORY_DIR, `history-${ymd}.jsonl`);
+    if (!fs.existsSync(file)) continue;
+    const lines = fs.readFileSync(file, "utf8").trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        const snap = JSON.parse(line);
+        if (snap.timestamp >= cutoff) result.push(snap);
+      } catch {}
+    }
   }
+
+  result.sort((a, b) => a.timestamp - b.timestamp);
   return result;
 }
 
