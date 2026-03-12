@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Usage</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login-screen">
+    <div class="login-box">
+      <h2>Claude Status Dashboard</h2>
+      <p>Password required</p>
+      <form id="login-form">
+        <input type="password" id="password-input" placeholder="Password" autofocus>
+        <button type="submit">Enter</button>
+      </form>
+      <div id="login-error"></div>
+    </div>
+  </div>
+  <div id="app" style="display:none">
+    <header>
+      <h1>Claude Usage</h1>
+      <div class="meta">
+        <span id="last-updated">Loading...</span>
+        <span id="next-refresh"></span>
+      </div>
+    </header>
+    <main id="dashboard"></main>
+    <section id="chart-section">
+      <div class="chart-header">
+        <h2>Usage History</h2>
+        <div class="range-buttons">
+          <button class="range-btn active" data-range="1h">1h</button>
+          <button class="range-btn" data-range="5h">5h</button>
+          <button class="range-btn" data-range="1d">1d</button>
+          <button class="range-btn" data-range="7d">7d</button>
+        </div>
+      </div>
+      <div id="charts"></div>
+    </section>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="app.js"></script>
+</body>
+</html>
