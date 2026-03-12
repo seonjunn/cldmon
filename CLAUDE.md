@@ -8,7 +8,7 @@ Node.js + Express dashboard that scrapes claude.ai usage data via Puppeteer (ste
 
 - `server.js` — all backend logic (Express, Puppeteer, history, scheduling)
 - `config.json` — runtime config (accounts, password, port, interval); re-read on each poll, no restart needed for account changes
-- `data/history.jsonl` — append-only JSONL history file
+- `data/history-YYYY-MM-DD.jsonl` — append-only JSONL history, one file per day
 - `public/` — static frontend (vanilla JS + Chart.js)
 - `ecosystem.config.js` — pm2 config
 
@@ -31,7 +31,7 @@ npx pm2 start ecosystem.config.js    # background / production
 ## Architecture notes
 
 - Puppeteer launches a headless Chrome per poll cycle, injects the `sessionKey` cookie, hits `/api/organizations` then `/api/organizations/{uuid}/usage`, and closes the page
-- `cachedUsage` is an in-memory variable; history is persisted to `data/history.jsonl`
+- `cachedUsage` is an in-memory variable; history is persisted to daily files (`data/history-YYYY-MM-DD.jsonl`)
 - Poll interval is `FETCH_INTERVAL_MS` (hardcoded at top of `server.js`); `fetchIntervalMinutes` in config.json is the intended override but requires wiring into the server (currently hardcoded)
 - Sessions use `express-session` with in-memory store; sessions are lost on restart
 
@@ -66,5 +66,5 @@ Checks: process running → HTTP 200/401 → valid JSON → at least one account
 ## Known issues / gotchas
 
 - The `.bin/puppeteer` shim requires `../puppeteer.js` relative to `.bin/`, which doesn't exist — always use the full CLI path
-- `data/history.jsonl` grows unboundedly; prune manually for long-running deployments
+- History files (`data/history-YYYY-MM-DD.jsonl`) accumulate indefinitely; delete old day files manually when no longer needed
 - Config is re-read on each poll for accounts/sessionKey, but `port` and `fetchIntervalMinutes` are only read at startup

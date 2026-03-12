@@ -105,7 +105,7 @@ Array of snapshots saved to `data/history.jsonl`:
 ]
 ```
 
-History is stored as a JSONL file (`data/history.jsonl`, one JSON object per line). It is **not** automatically pruned — each successful poll appends one line. For long-running deployments, periodically archive or truncate old entries.
+History is stored as daily JSONL files (`data/history-YYYY-MM-DD.jsonl`, one JSON object per poll). Old day files can be deleted or archived freely without affecting the running service.
 
 ## Configuration reference
 
