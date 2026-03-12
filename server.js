@@ -40,7 +40,10 @@ async function getBrowser() {
 
 async function claudeGetJson(urlPath, sessionKey) {
   const b = await getBrowser();
-  const page = await b.newPage();
+  // Use an isolated context per request so cookies are never shared between
+  // accounts (default context shares a single cookie jar across all pages).
+  const context = await b.createBrowserContext();
+  const page = await context.newPage();
   try {
     await page.setCookie({
       name: "sessionKey",
@@ -67,7 +70,7 @@ async function claudeGetJson(urlPath, sessionKey) {
     const text = await page.evaluate(() => document.body.innerText);
     return JSON.parse(text);
   } finally {
-    await page.close();
+    await context.close();
   }
 }
 

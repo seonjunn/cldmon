@@ -11,8 +11,12 @@ A self-hosted dashboard that tracks Claude subscription usage (5-hour and 7-day 
 ### Getting your session key
 
 1. Log in to [claude.ai](https://claude.ai) in your browser
-2. Open DevTools (`F12` or `Cmd+Option+I`)
-3. Go to **Application** tab → **Cookies** → `https://claude.ai`
+2. Open DevTools:
+   - **Chrome/Edge:** `F12` or `Ctrl+Shift+I` (Windows/Linux), `Cmd+Option+I` (Mac)
+   - **Firefox:** `F12` or `Ctrl+Shift+I` (Windows/Linux), `Cmd+Option+I` (Mac)
+3. Navigate to the cookies panel:
+   - **Chrome/Edge:** **Application** tab → **Storage** → **Cookies** → `https://claude.ai`
+   - **Firefox:** **Storage** tab → **Cookies** → `https://claude.ai`
 4. Find the cookie named `sessionKey` and copy its value (starts with `sk-ant-sid02-`)
 
 > The session key grants full access to your Claude account — treat it like a password. It lives only in `config.json` on this server and is never sent over the network (Puppeteer uses it server-side). Rotate it by logging out and back in on claude.ai.
