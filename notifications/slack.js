@@ -43,20 +43,33 @@ function postJson(url, headers, body) {
   });
 }
 
+function formatResetTime(isoString) {
+  if (!isoString) return "unknown";
+  const d = new Date(isoString);
+  const month = d.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  const day = d.getUTCDate();
+  const hour = String(d.getUTCHours()).padStart(2, "0");
+  const min = String(d.getUTCMinutes()).padStart(2, "0");
+  return `${month} ${day}, ${hour}:${min} UTC`;
+}
+
 function formatSlackMessage(event, mention) {
-  const prefix = mention ? `${mention} ` : "";
+  const prefix = mention ? `${mention}\n` : "";
+  const account = `\`${event.accountLabel}\``;
+  const reset = formatResetTime(event.resetsAt);
 
   if (event.type === "limit_hit") {
-    return `${prefix}Claude usage limit hit for *${event.accountLabel}* (${event.windowLabel}). Usage is now ${event.currentUtilization}%. Next reset: ${event.resetsAt}.`;
+    return `${prefix}🔴 *Limit hit* — ${account} (${event.windowLabel})\nResets: ${reset}`;
   }
 
-  return `${prefix}Claude usage reset detected for *${event.accountLabel}* (${event.windowLabel}). Previous usage was ${event.previousUtilization}% and is now ${event.currentUtilization}%. Next reset: ${event.resetsAt}.`;
+  return `${prefix}🟢 *Usage reset* — ${account} (${event.windowLabel})\n${event.previousUtilization}% → ${event.currentUtilization}%  ·  Next reset: ${reset}`;
 }
 
 function formatSubscriptionMessage(change) {
-  const stateText = change.enabled ? "enabled" : "disabled";
-  const alertTypeText = change.key === "limitHit" ? "limit hit" : "reset";
-  return `Slack alert ${stateText} for *${change.accountLabel}* (${alertTypeText}).`;
+  const account = `\`${change.accountLabel}\``;
+  const alertType = change.key === "limitHit" ? "limit hit" : "reset";
+  const icon = change.enabled ? "🔔" : "🔕";
+  return `${icon} ${account} — ${alertType} alerts *${change.enabled ? "enabled" : "disabled"}*`;
 }
 
 function createSlackNotifier(slackConfig) {
