@@ -23,7 +23,7 @@ node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrom
 
 ## Running
 
-**The server is managed by pm2 and runs as a systemd service. Do NOT run `node server.js` directly in production — it will conflict with pm2 or die without supervision.**
+**NEVER run `node server.js` directly.** This has caused repeated incidents where a stray bare process holds port 3000 while pm2's managed process silently fails to bind — resulting in the old code serving requests while the new code appears to be running. The only safe way to run this server is through pm2.
 
 ```sh
 npx pm2 status                        # check if running
@@ -32,6 +32,15 @@ npx pm2 restart cldmon               # restart after code changes
 npx pm2 stop cldmon                  # stop
 npx pm2 start ecosystem.config.js    # start if not running
 ```
+
+Before any restart, verify no stray processes are competing:
+
+```sh
+ps aux | grep "node server" | grep -v grep   # should show only the pm2-managed pid
+ss -tlnp | grep 3000                         # should show that pid on port 3000
+```
+
+If a stray process is found, kill it with `kill -9 <PID>` before restarting pm2.
 
 pm2 is wired to systemd (`pm2-seonjunkim.service`) and will auto-start on reboot. After any change to the process list, run `npx pm2 save` to persist it.
 
