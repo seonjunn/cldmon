@@ -23,10 +23,17 @@ node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrom
 
 ## Running
 
+**The server is managed by pm2 and runs as a systemd service. Do NOT run `node server.js` directly in production — it will conflict with pm2 or die without supervision.**
+
 ```sh
-node server.js                        # foreground
-npx pm2 start ecosystem.config.js    # background / production
+npx pm2 status                        # check if running
+npx pm2 logs cldmon                   # tail logs
+npx pm2 restart cldmon               # restart after code changes
+npx pm2 stop cldmon                  # stop
+npx pm2 start ecosystem.config.js    # start if not running
 ```
+
+pm2 is wired to systemd (`pm2-seonjunkim.service`) and will auto-start on reboot. After any change to the process list, run `npx pm2 save` to persist it.
 
 ## Architecture notes
 

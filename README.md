@@ -61,14 +61,21 @@ Edit `config.json`:
 ## Running
 
 ```sh
-# Development (foreground)
-npm start
-
-# Production (persistent, with pm2)
+# Production (pm2 — use this)
 npx pm2 start ecosystem.config.js
 npx pm2 save
-npx pm2 startup   # follow the printed command to auto-start on reboot
+npx pm2 startup   # follow the printed command to register with systemd
+
+# Common pm2 commands
+npx pm2 status
+npx pm2 logs cldmon
+npx pm2 restart cldmon
+
+# Development only (foreground, no auto-restart)
+npm start
 ```
+
+> **Always use pm2 in production.** Running `node server.js` directly gives no auto-restart on crashes or reboots.
 
 ## API
 
