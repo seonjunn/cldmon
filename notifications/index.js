@@ -6,15 +6,15 @@ function createNotificationDispatcher(config) {
   const notifiers = [];
   const slackConfig = config?.notifications?.slack;
 
-  if (slackConfig?.enabled && slackConfig.botToken && slackConfig.channelId) {
+  if (slackConfig?.enabled && slackConfig.botToken) {
     notifiers.push(createSlackNotifier(slackConfig));
   }
 
   return {
-    async notifyEvents(events) {
-      for (const event of events) {
+    async notifyEvents(deliveries) {
+      for (const delivery of deliveries) {
         const results = await Promise.allSettled(
-          notifiers.map((notifier) => notifier.notifyEvent(event))
+          notifiers.map((notifier) => notifier.notifyEvent(delivery.event, delivery.slackId))
         );
 
         results.forEach((result, index) => {
@@ -24,11 +24,11 @@ function createNotificationDispatcher(config) {
         });
       }
     },
-    async notifySubscriptionChange(change) {
+    async notifySubscriptionChange(change, slackId) {
       const subscriptionNotifiers = notifiers
         .filter((notifier) => typeof notifier.notifySubscriptionChange === "function");
       const results = await Promise.allSettled(
-        subscriptionNotifiers.map((notifier) => notifier.notifySubscriptionChange(change))
+        subscriptionNotifiers.map((notifier) => notifier.notifySubscriptionChange(change, slackId))
       );
 
       results.forEach((result, index) => {

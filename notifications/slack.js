@@ -53,16 +53,15 @@ function formatResetTime(isoString) {
   return `${month} ${day}, ${hour}:${min} UTC`;
 }
 
-function formatSlackMessage(event, mention) {
-  const prefix = mention ? `${mention}\n` : "";
+function formatSlackMessage(event) {
   const account = `\`${event.accountLabel}\``;
   const reset = formatResetTime(event.resetsAt);
 
   if (event.type === "limit_hit") {
-    return `${prefix}🔴 *Limit hit* — ${account} (${event.windowLabel})\nResets: ${reset}`;
+    return `🔴 *Limit hit* — ${account} (${event.windowLabel})\nResets: ${reset}`;
   }
 
-  return `${prefix}🟢 *Usage reset* — ${account} (${event.windowLabel})\n${event.previousUtilization}% → ${event.currentUtilization}%  ·  Next reset: ${reset}`;
+  return `🟢 *Usage reset* — ${account} (${event.windowLabel})\n${event.previousUtilization}% → ${event.currentUtilization}%  ·  Next reset: ${reset}`;
 }
 
 function formatSubscriptionMessage(change) {
@@ -75,21 +74,21 @@ function formatSubscriptionMessage(change) {
 function createSlackNotifier(slackConfig) {
   return {
     name: "slack",
-    async notifyEvent(event) {
+    async notifyEvent(event, slackId) {
       await postJson("https://slack.com/api/chat.postMessage", {
         Authorization: `Bearer ${slackConfig.botToken}`,
       }, {
-        channel: slackConfig.channelId,
-        text: formatSlackMessage(event, slackConfig.mention),
+        channel: slackId,
+        text: formatSlackMessage(event),
         unfurl_links: false,
         unfurl_media: false,
       });
     },
-    async notifySubscriptionChange(change) {
+    async notifySubscriptionChange(change, slackId) {
       await postJson("https://slack.com/api/chat.postMessage", {
         Authorization: `Bearer ${slackConfig.botToken}`,
       }, {
-        channel: slackConfig.channelId,
+        channel: slackId,
         text: formatSubscriptionMessage(change),
         unfurl_links: false,
         unfurl_media: false,
