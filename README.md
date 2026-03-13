@@ -43,7 +43,8 @@ Edit `config.json`:
   "notifications": {
     "slack": {
       "enabled": true,
-      "botToken": "xoxb-..."
+      "botToken": "xoxb-...",
+      "memberChannelId": "C0123456789"
     }
   },
   "accounts": [
@@ -128,6 +129,7 @@ History is stored as daily JSONL files (`data/history-YYYY-MM-DD.jsonl`, one JSO
 | `fetchIntervalMinutes` | `10` | How often to poll claude.ai for fresh data (in minutes). See note below. |
 | `notifications.slack.enabled` | `false` | Enables Slack delivery for reset events. |
 | `notifications.slack.botToken` | `""` | Slack bot token (`xoxb-...`) with permission to post to user App Home or DM targets. |
+| `notifications.slack.memberChannelId` | `""` | Optional Slack channel ID used to limit login autocomplete to members of that channel. Leave empty to search the whole workspace. |
 | `accounts` | `[]` | List of `{ label, sessionKey }` objects. |
 
 ## Slack reset notifications

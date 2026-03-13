@@ -24,7 +24,6 @@ const SLACK_USERS_CACHE_FILE = path.join(__dirname, "data", "slack-users-cache.j
 const FETCH_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 const SLACK_USER_CACHE_MS = 24 * 60 * 60 * 1000;
 const SLACK_USER_REFRESH_MS = 24 * 60 * 60 * 1000;
-const SLACK_MEMBER_CHANNEL_ID = "CF7KQET5Z";
 const CHROME_CANDIDATES = [
   process.env.PUPPETEER_EXECUTABLE_PATH,
   "/usr/bin/google-chrome-stable",
@@ -217,12 +216,19 @@ function writeSlackUsersCacheToDisk() {
 }
 
 async function fetchSlackChannelMemberIds(botToken) {
+  const config = loadConfig();
+  const memberChannelId = config?.notifications?.slack?.memberChannelId;
+
+  if (!memberChannelId) {
+    return [];
+  }
+
   const info = await getSlackApiJson("conversations.info", botToken, {
-    channel: SLACK_MEMBER_CHANNEL_ID,
+    channel: memberChannelId,
   });
   const conversation = info.channel || {};
   console.log(
-    `[slack-users] Channel ${SLACK_MEMBER_CHANNEL_ID}: name=${conversation.name || "unknown"} ` +
+    `[slack-users] Channel ${memberChannelId}: name=${conversation.name || "unknown"} ` +
     `is_channel=${conversation.is_channel === true} is_private=${conversation.is_private === true} ` +
     `is_member=${conversation.is_member === true}`
   );
@@ -232,7 +238,7 @@ async function fetchSlackChannelMemberIds(botToken) {
 
   do {
     const response = await getSlackApiJson("conversations.members", botToken, {
-      channel: SLACK_MEMBER_CHANNEL_ID,
+      channel: memberChannelId,
       limit: 1000,
       cursor,
     });
@@ -286,7 +292,7 @@ async function getSlackUsers(forceRefresh = false) {
     const users = workspaceUsers
       .filter((member) => (
         member?.id &&
-        allowedMemberIds.has(member.id) &&
+        (allowedMemberIds.size === 0 || allowedMemberIds.has(member.id)) &&
         !member.deleted &&
         !member.is_bot &&
         !member.is_app_user &&
@@ -521,6 +527,56 @@ function getSessionState(req) {
   };
 }
 
+function isSlackEnabled(config = loadConfig()) {
+  return config?.notifications?.slack?.enabled === true;
+}
+
+async function validateSlackConfig(config) {
+  if (!isSlackEnabled(config)) {
+    return;
+  }
+
+  const slackConfig = config?.notifications?.slack || {};
+  const botToken = typeof slackConfig.botToken === "string" ? slackConfig.botToken.trim() : "";
+  const memberChannelId = typeof slackConfig.memberChannelId === "string" ? slackConfig.memberChannelId.trim() : "";
+
+  if (!botToken) {
+    throw new Error("Slack is enabled but notifications.slack.botToken is missing in config.json");
+  }
+
+  let authInfo;
+  try {
+    authInfo = await getSlackApiJson("auth.test", botToken);
+  } catch (error) {
+    throw new Error(`Invalid Slack bot token in config.json: ${error.message}`);
+  }
+
+  console.log(
+    `[startup] Slack bot authenticated for team=${authInfo.team || "unknown"} user=${authInfo.user || "unknown"}`
+  );
+
+  if (!memberChannelId) {
+    return;
+  }
+
+  let channelInfo;
+  try {
+    channelInfo = await getSlackApiJson("conversations.info", botToken, {
+      channel: memberChannelId,
+    });
+  } catch (error) {
+    throw new Error(
+      `Invalid notifications.slack.memberChannelId in config.json: ${error.message}`
+    );
+  }
+
+  const channel = channelInfo.channel || {};
+  console.log(
+    `[startup] Slack member channel validated: id=${memberChannelId} name=${channel.name || "unknown"} ` +
+    `is_channel=${channel.is_channel === true} is_private=${channel.is_private === true}`
+  );
+}
+
 async function refreshUsage() {
   const config = loadConfig();
   const accounts = await Promise.all(config.accounts.map(fetchAccountUsage));
@@ -571,6 +627,11 @@ app.use(
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/api/slack/users", async (req, res) => {
+  if (!isSlackEnabled()) {
+    res.json({ users: [] });
+    return;
+  }
+
   const query = typeof req.query.q === "string" ? req.query.q : "";
 
   try {
@@ -584,6 +645,11 @@ app.get("/api/slack/users", async (req, res) => {
 
 // POST /api/auth
 app.post("/api/auth", async (req, res) => {
+  if (!isSlackEnabled()) {
+    res.status(404).json({ error: "Slack login is disabled" });
+    return;
+  }
+
   const slackId = typeof req.body?.slackId === "string" ? req.body.slackId.trim() : "";
 
   if (!slackId) {
@@ -618,15 +684,24 @@ app.post("/api/auth", async (req, res) => {
 });
 
 function requireAuth(req, res, next) {
+  if (!isSlackEnabled()) return next();
   if (req.session?.authenticated) return next();
   res.status(401).json({ error: "Unauthorized" });
 }
 
 app.get("/api/session", (req, res) => {
-  res.json(getSessionState(req));
+  res.json({
+    ...getSessionState(req),
+    slackEnabled: isSlackEnabled(),
+  });
 });
 
 app.post("/api/logout", requireAuth, (req, res) => {
+  if (!isSlackEnabled()) {
+    res.json({ ok: true });
+    return;
+  }
+
   req.session.destroy((error) => {
     if (error) {
       res.status(500).json({ error: "Failed to log out" });
@@ -641,6 +716,7 @@ app.post("/api/logout", requireAuth, (req, res) => {
 app.get("/api/usage", requireAuth, (req, res) => {
   const config = loadConfig();
   const accountLabels = config.accounts.map((account) => account.label);
+  const slackEnabled = isSlackEnabled(config);
   if (!cachedUsage) {
     res.json({
       fetchedAt: null,
@@ -648,7 +724,10 @@ app.get("/api/usage", requireAuth, (req, res) => {
       loading: true,
       refreshIntervalMs: FETCH_INTERVAL_MS,
       session: getSessionState(req),
-      alertSubscriptions: getAccountSubscriptions(getSessionState(req).slackId, accountLabels),
+      slackEnabled,
+      alertSubscriptions: slackEnabled
+        ? getAccountSubscriptions(getSessionState(req).slackId, accountLabels)
+        : {},
     });
     return;
   }
@@ -657,11 +736,19 @@ app.get("/api/usage", requireAuth, (req, res) => {
   res.json({
     ...cachedUsage,
     session,
-    alertSubscriptions: getAccountSubscriptions(session.slackId, accountLabels),
+    slackEnabled,
+    alertSubscriptions: slackEnabled
+      ? getAccountSubscriptions(session.slackId, accountLabels)
+      : {},
   });
 });
 
 app.post("/api/subscriptions", requireAuth, (req, res) => {
+  if (!isSlackEnabled()) {
+    res.status(404).json({ error: "Slack alerts are disabled" });
+    return;
+  }
+
   const { label, key, enabled } = req.body || {};
 
   if (!label || !["limitHit", "reset"].includes(key) || typeof enabled !== "boolean") {
@@ -713,16 +800,25 @@ app.get("/api/history", requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
-const config = loadConfig();
-const PORT = config.port || 3000;
-const HOST = config.host || "0.0.0.0";
+async function startServer() {
+  const config = loadConfig();
+  const PORT = config.port || 3000;
+  const HOST = config.host || "0.0.0.0";
 
-app.listen(PORT, HOST, () => {
-  console.log(`Claude Status Dashboard running at http://${HOST}:${PORT}`);
-  // Initial fetch
-  refreshUsage().catch(console.error);
-  refreshSlackUsers();
-  // Schedule periodic refresh
-  setInterval(() => refreshUsage().catch(console.error), FETCH_INTERVAL_MS);
-  setInterval(refreshSlackUsers, SLACK_USER_REFRESH_MS);
+  await validateSlackConfig(config);
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Claude Status Dashboard running at http://${HOST}:${PORT}`);
+    // Initial fetch
+    refreshUsage().catch(console.error);
+    refreshSlackUsers();
+    // Schedule periodic refresh
+    setInterval(() => refreshUsage().catch(console.error), FETCH_INTERVAL_MS);
+    setInterval(refreshSlackUsers, SLACK_USER_REFRESH_MS);
+  });
+}
+
+startServer().catch((error) => {
+  console.error(`[startup] ${error.message}`);
+  process.exit(1);
 });

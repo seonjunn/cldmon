@@ -4,7 +4,8 @@
   "notifications": {
     "slack": {
       "enabled": false,
-      "botToken": "xoxb-REPLACE_WITH_YOUR_BOT_TOKEN"
+      "botToken": "xoxb-REPLACE_WITH_YOUR_BOT_TOKEN",
+      "memberChannelId": "C0123456789"
     }
   },
   "accounts": [

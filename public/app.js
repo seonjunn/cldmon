@@ -15,6 +15,7 @@ let sessionState = {
   slackId: "",
   slackName: "",
 };
+let slackEnabled = true;
 let slackSearchTimer = null;
 let slackSearchRequestId = 0;
 let slackUsers = [];
@@ -62,7 +63,15 @@ function setSessionState(nextState) {
 }
 
 function updateSessionUi() {
+  const sessionBar = document.querySelector(".session-bar");
   const sessionLabel = document.getElementById("session-label");
+  if (sessionBar) {
+    sessionBar.style.display = slackEnabled ? "" : "none";
+  }
+  if (!slackEnabled) {
+    sessionLabel.textContent = "";
+    return;
+  }
   if (sessionState.guest) {
     sessionLabel.textContent = "Guest mode";
     return;
@@ -155,6 +164,11 @@ function scheduleSlackSearch() {
 }
 
 function showLoginScreen() {
+  if (!slackEnabled) {
+    showDashboard();
+    return;
+  }
+
   stopRefreshLoop();
   lastFetchedAt = null;
   alertSubscriptions = {};
@@ -316,7 +330,13 @@ logoutButton.addEventListener("click", async () => {
 async function checkSession() {
   try {
     const data = await apiFetchJson("/api/session");
+    slackEnabled = data?.slackEnabled !== false;
     setSessionState(data);
+    updateSessionUi();
+    if (!slackEnabled) {
+      showDashboard();
+      return;
+    }
     if (sessionState.authenticated) {
       showDashboard();
       return;
@@ -354,6 +374,10 @@ function formatResetLine(isoString) {
 }
 
 function renderNotificationControls(accountLabel) {
+  if (!slackEnabled) {
+    return "";
+  }
+
   const notificationSettings = alertSubscriptions[accountLabel] || { limitHit: false, reset: false };
   const guestClass = sessionState.guest ? "guest" : "";
   const disabledAttr = sessionState.guest ? "disabled" : "";
@@ -431,6 +455,7 @@ async function refresh() {
     const fetchedAt = data.fetchedAt || null;
 
     refreshIntervalMs = data.refreshIntervalMs || DEFAULT_REFRESH_INTERVAL;
+    slackEnabled = data?.slackEnabled !== false;
     alertSubscriptions = data.alertSubscriptions || {};
     setSessionState(data.session);
     updateSessionUi();
@@ -452,7 +477,7 @@ async function refresh() {
       loadHistory(currentRange);
     }
   } catch (error) {
-    if (error.status === 401) {
+    if (slackEnabled && error.status === 401) {
       showLoginScreen();
       return;
     }
@@ -479,6 +504,10 @@ function showSubscriptionFeedback(controls, message, isError = false) {
 }
 
 document.getElementById("dashboard").addEventListener("click", async (event) => {
+  if (!slackEnabled) {
+    return;
+  }
+
   const button = event.target.closest("[data-notification-key]");
   if (!(button instanceof HTMLButtonElement) || sessionState.guest) {
     return;
