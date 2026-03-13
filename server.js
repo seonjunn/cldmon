@@ -118,6 +118,19 @@ function getJson(url, headers) {
   });
 }
 
+async function getSlackApiJson(pathname, botToken, params = {}) {
+  const url = new URL(`https://slack.com/api/${pathname}`);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return getJson(url, {
+    Authorization: `Bearer ${botToken}`,
+  });
+}
+
 function normalizeSlackSearchValue(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -204,14 +217,54 @@ function writeSlackUsersCacheToDisk() {
 }
 
 async function fetchSlackChannelMemberIds(botToken) {
-  const url = new URL("https://slack.com/api/conversations.members");
-  url.searchParams.set("channel", SLACK_MEMBER_CHANNEL_ID);
-
-  const response = await getJson(url, {
-    Authorization: `Bearer ${botToken}`,
+  const info = await getSlackApiJson("conversations.info", botToken, {
+    channel: SLACK_MEMBER_CHANNEL_ID,
   });
+  const conversation = info.channel || {};
+  console.log(
+    `[slack-users] Channel ${SLACK_MEMBER_CHANNEL_ID}: name=${conversation.name || "unknown"} ` +
+    `is_channel=${conversation.is_channel === true} is_private=${conversation.is_private === true} ` +
+    `is_member=${conversation.is_member === true}`
+  );
 
-  return Array.isArray(response.members) ? response.members : [];
+  const members = [];
+  let cursor = "";
+
+  do {
+    const response = await getSlackApiJson("conversations.members", botToken, {
+      channel: SLACK_MEMBER_CHANNEL_ID,
+      limit: 1000,
+      cursor,
+    });
+
+    if (Array.isArray(response.members)) {
+      members.push(...response.members);
+    }
+
+    cursor = response.response_metadata?.next_cursor || "";
+  } while (cursor);
+
+  return members;
+}
+
+async function fetchSlackWorkspaceUsers(botToken) {
+  const users = [];
+  let cursor = "";
+
+  do {
+    const response = await getSlackApiJson("users.list", botToken, {
+      limit: 200,
+      cursor,
+    });
+
+    if (Array.isArray(response.members)) {
+      users.push(...response.members);
+    }
+
+    cursor = response.response_metadata?.next_cursor || "";
+  } while (cursor);
+
+  return users;
 }
 
 async function getSlackUsers(forceRefresh = false) {
@@ -228,13 +281,9 @@ async function getSlackUsers(forceRefresh = false) {
 
   try {
     const allowedMemberIds = new Set(await fetchSlackChannelMemberIds(botToken));
-    const response = await postJson("https://slack.com/api/users.list", {
-      Authorization: `Bearer ${botToken}`,
-    }, {
-      limit: 500,
-    });
+    const workspaceUsers = await fetchSlackWorkspaceUsers(botToken);
 
-    const users = (response.members || [])
+    const users = workspaceUsers
       .filter((member) => (
         member?.id &&
         allowedMemberIds.has(member.id) &&
