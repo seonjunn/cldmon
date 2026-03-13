@@ -1,11 +1,32 @@
+"use strict";
+
 const POLL_INTERVAL = 15_000;
-const DEFAULT_REFRESH_INTERVAL = 10 * 60_000; // 10 min
+const DEFAULT_REFRESH_INTERVAL = 10 * 60_000;
+const SLACK_SEARCH_DEBOUNCE_MS = 120;
 
 let countdownTimer = null;
 let refreshTimer = null;
 let refreshIntervalMs = DEFAULT_REFRESH_INTERVAL;
 let lastFetchedAt = null;
 let alertSubscriptions = {};
+let sessionState = {
+  authenticated: false,
+  guest: false,
+  slackId: "",
+  slackName: "",
+};
+let slackSearchTimer = null;
+let slackSearchRequestId = 0;
+let slackUsers = [];
+let highlightedSlackUserIndex = -1;
+let selectedSlackUser = null;
+
+const loginForm = document.getElementById("login-form");
+const slackIdInput = document.getElementById("slack-id-input");
+const slackUserMenu = document.getElementById("slack-user-menu");
+const loginError = document.getElementById("login-error");
+const logoutButton = document.getElementById("logout-button");
+const enterButton = document.getElementById("enter-button");
 
 async function apiFetchJson(url, options) {
   const res = await fetch(url, options);
@@ -23,49 +44,287 @@ async function apiFetchJson(url, options) {
   }
 
   if (!res.ok) {
-    throw new Error(data?.error || `Request failed (${res.status})`);
+    const error = new Error(data?.error || `Request failed (${res.status})`);
+    error.status = res.status;
+    throw error;
   }
 
   return data;
 }
 
-// --- Auth ---
-document.getElementById("login-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const pw = document.getElementById("password-input").value;
-  const errEl = document.getElementById("login-error");
-  errEl.textContent = "";
+function setSessionState(nextState) {
+  sessionState = {
+    authenticated: nextState?.authenticated === true,
+    guest: nextState?.guest === true,
+    slackId: typeof nextState?.slackId === "string" ? nextState.slackId : "",
+    slackName: typeof nextState?.slackName === "string" ? nextState.slackName : "",
+  };
+}
 
-  try {
-    await apiFetchJson("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pw }),
-    });
-    showDashboard();
-  } catch {
-    errEl.textContent = "Connection error";
-  }
-});
-
-async function checkSession() {
-  try {
-    await apiFetchJson("/api/usage");
-    showDashboard();
+function updateSessionUi() {
+  const sessionLabel = document.getElementById("session-label");
+  if (sessionState.guest) {
+    sessionLabel.textContent = "Guest mode";
     return;
-  } catch {}
-  // not authenticated — login screen stays visible
+  }
+
+  sessionLabel.textContent = sessionState.slackName || sessionState.slackId;
+}
+
+function stopRefreshLoop() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+}
+
+function clearSlackSelection() {
+  selectedSlackUser = null;
+}
+
+function hideSlackUserMenu() {
+  slackUserMenu.hidden = true;
+  slackUserMenu.innerHTML = "";
+  slackUsers = [];
+  highlightedSlackUserIndex = -1;
+}
+
+function renderSlackUserMenu() {
+  if (slackUsers.length === 0) {
+    slackUserMenu.innerHTML = '<div class="slack-user-empty">No matching Slack members</div>';
+    slackUserMenu.hidden = false;
+    highlightedSlackUserIndex = -1;
+    return;
+  }
+
+  if (highlightedSlackUserIndex < 0 || highlightedSlackUserIndex >= slackUsers.length) {
+    highlightedSlackUserIndex = 0;
+  }
+
+  slackUserMenu.innerHTML = slackUsers.map((user, index) => {
+    const activeClass = index === highlightedSlackUserIndex ? "active" : "";
+    return `
+      <button type="button" class="slack-user-option ${activeClass}" data-user-index="${index}">
+        <span class="slack-user-option-name">${user.name}</span>
+      </button>`;
+  }).join("");
+  slackUserMenu.hidden = false;
+}
+
+function applySlackUserSelection(user) {
+  selectedSlackUser = user;
+  slackIdInput.value = user.name;
+  hideSlackUserMenu();
+  slackIdInput.focus();
+}
+
+async function searchSlackUsers(query) {
+  const requestId = ++slackSearchRequestId;
+  try {
+    const data = await apiFetchJson(`/api/slack/users?q=${encodeURIComponent(query.trim())}`);
+    if (requestId !== slackSearchRequestId) {
+      return;
+    }
+
+    slackUsers = data.users || [];
+    highlightedSlackUserIndex = slackUsers.length > 0 ? 0 : -1;
+    renderSlackUserMenu();
+  } catch {
+    if (requestId !== slackSearchRequestId) {
+      return;
+    }
+    slackUsers = [];
+    highlightedSlackUserIndex = -1;
+    slackUserMenu.innerHTML = '<div class="slack-user-empty">Slack member search is unavailable right now</div>';
+    slackUserMenu.hidden = false;
+  }
+}
+
+function scheduleSlackSearch() {
+  if (slackSearchTimer) {
+    clearTimeout(slackSearchTimer);
+  }
+
+  slackSearchTimer = setTimeout(() => {
+    searchSlackUsers(slackIdInput.value);
+  }, SLACK_SEARCH_DEBOUNCE_MS);
+}
+
+function showLoginScreen() {
+  stopRefreshLoop();
+  lastFetchedAt = null;
+  alertSubscriptions = {};
+  setSessionState({ authenticated: false, guest: false, slackId: "", slackName: "" });
+  document.getElementById("app").style.display = "none";
+  document.getElementById("login-screen").style.display = "";
+  document.getElementById("last-updated").textContent = "Loading...";
+  document.getElementById("next-refresh").textContent = "";
+  document.getElementById("dashboard").innerHTML = "";
+  document.getElementById("charts").innerHTML = "";
+  loginError.textContent = "";
+  slackIdInput.value = "";
+  clearSlackSelection();
+  hideSlackUserMenu();
+  slackIdInput.focus();
 }
 
 function showDashboard() {
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app").style.display = "";
+  updateSessionUi();
   refresh();
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(refresh, POLL_INTERVAL);
 }
 
-checkSession();
+slackIdInput.addEventListener("input", () => {
+  loginError.textContent = "";
+  if (!slackIdInput.value.trim()) {
+    clearSlackSelection();
+    hideSlackUserMenu();
+    if (slackSearchTimer) {
+      clearTimeout(slackSearchTimer);
+    }
+    slackSearchRequestId += 1;
+    return;
+  }
+
+  if (selectedSlackUser && slackIdInput.value.trim() !== selectedSlackUser.name) {
+    clearSlackSelection();
+  }
+
+  scheduleSlackSearch();
+});
+
+slackIdInput.addEventListener("focus", () => {
+  loginError.textContent = "";
+  if (slackIdInput.value.trim()) {
+    scheduleSlackSearch();
+  }
+});
+
+slackIdInput.addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown") {
+    if (slackUserMenu.hidden || slackUsers.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    highlightedSlackUserIndex = (highlightedSlackUserIndex + 1) % slackUsers.length;
+    renderSlackUserMenu();
+    return;
+  }
+
+  if (event.key === "ArrowUp") {
+    if (slackUserMenu.hidden || slackUsers.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    highlightedSlackUserIndex = (highlightedSlackUserIndex - 1 + slackUsers.length) % slackUsers.length;
+    renderSlackUserMenu();
+    return;
+  }
+
+  if (event.key === "Enter" && !slackUserMenu.hidden && highlightedSlackUserIndex >= 0 && slackUsers[highlightedSlackUserIndex]) {
+    event.preventDefault();
+    event.stopPropagation();
+    applySlackUserSelection(slackUsers[highlightedSlackUserIndex]);
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.stopPropagation();
+    hideSlackUserMenu();
+  }
+});
+
+slackUserMenu.addEventListener("mousedown", (event) => {
+  const option = event.target.closest("[data-user-index]");
+  if (!(option instanceof HTMLElement)) {
+    return;
+  }
+
+  event.preventDefault();
+  const index = Number(option.dataset.userIndex);
+  const user = slackUsers[index];
+  if (user) {
+    applySlackUserSelection(user);
+  }
+});
+
+slackIdInput.addEventListener("blur", () => {
+  window.setTimeout(() => {
+    hideSlackUserMenu();
+  }, 100);
+});
+
+async function submitLogin() {
+  loginError.textContent = "";
+
+  const enteredValue = slackIdInput.value.trim();
+  if (enteredValue && !selectedSlackUser) {
+    if (slackUsers.length === 1) {
+      applySlackUserSelection(slackUsers[0]);
+    } else {
+      loginError.textContent = "Pick an exact Slack name from the autocomplete list, or leave it empty for guest mode.";
+      return;
+    }
+  }
+
+  try {
+    const data = await apiFetchJson("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slackId: selectedSlackUser?.id || "" }),
+    });
+    setSessionState(data.session);
+    showDashboard();
+  } catch (error) {
+    loginError.textContent = error.message;
+  }
+}
+
+enterButton.addEventListener("click", submitLogin);
+
+loginForm.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) {
+    return;
+  }
+
+  if (event.key === "Enter" && !slackUserMenu.hidden) {
+    return;
+  }
+
+  if (event.key === "Enter") {
+    event.preventDefault();
+    submitLogin();
+  }
+});
+
+logoutButton.addEventListener("click", async () => {
+  try {
+    await apiFetchJson("/api/logout", { method: "POST" });
+  } catch {}
+  showLoginScreen();
+});
+
+async function checkSession() {
+  try {
+    const data = await apiFetchJson("/api/session");
+    setSessionState(data);
+    if (sessionState.authenticated) {
+      showDashboard();
+      return;
+    }
+  } catch {}
+
+  showLoginScreen();
+}
 
 function getStatusColor(utilization) {
   if (utilization >= 85) return "red";
@@ -90,15 +349,28 @@ function formatTimeUntil(isoString) {
   return `resets in ${mins}m`;
 }
 
+function formatResetLine(isoString) {
+  return formatTimeUntil(isoString) || "\u00A0";
+}
+
+function renderNotificationControls(accountLabel) {
+  const notificationSettings = alertSubscriptions[accountLabel] || { limitHit: false, reset: false };
+  const guestClass = sessionState.guest ? "guest" : "";
+  const disabledAttr = sessionState.guest ? "disabled" : "";
+  const guestMessage = sessionState.guest ? "Guest mode" : "";
+  const feedbackClass = sessionState.guest ? "subscription-feedback muted" : "subscription-feedback";
+
+  return `
+    <div class="notification-controls ${guestClass}" data-account-label="${accountLabel}">
+      <span class="notification-title">Slack alerts</span>
+      <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}" ${disabledAttr}>Hit</button>
+      <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}" ${disabledAttr}>Reset</button>
+      <span class="${feedbackClass}" aria-live="polite">${guestMessage}</span>
+    </div>`;
+}
+
 function renderCard(account) {
-  const notificationSettings = alertSubscriptions[account.label] || { limitHit: false, reset: false };
-  const notificationControls = `
-      <div class="notification-controls" data-account-label="${account.label}">
-        <span class="notification-title">Slack alerts</span>
-        <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}">Hit</button>
-        <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}">Reset</button>
-        <span class="subscription-feedback" aria-live="polite"></span>
-      </div>`;
+  const notificationControls = renderNotificationControls(account.label);
 
   if (account.status === "error") {
     return `
@@ -130,7 +402,7 @@ function renderCard(account) {
         <div class="progress-bar">
           <div class="progress-fill ${getStatusColor(fh.utilization)}" style="width:${fh.utilization}%"></div>
         </div>
-        <div class="reset-time" data-resets="${fh.resetsAt || ""}">${formatTimeUntil(fh.resetsAt)}</div>
+        <div class="reset-time" data-resets="${fh.resetsAt || ""}">${formatResetLine(fh.resetsAt)}</div>
       </div>
       <div class="usage-section">
         <div class="usage-label">
@@ -140,7 +412,7 @@ function renderCard(account) {
         <div class="progress-bar">
           <div class="progress-fill ${getStatusColor(sd.utilization)}" style="width:${sd.utilization}%"></div>
         </div>
-        <div class="reset-time" data-resets="${sd.resetsAt || ""}">${formatTimeUntil(sd.resetsAt)}</div>
+        <div class="reset-time" data-resets="${sd.resetsAt || ""}">${formatResetLine(sd.resetsAt)}</div>
       </div>
       ${notificationControls}
     </div>`;
@@ -160,12 +432,14 @@ async function refresh() {
 
     refreshIntervalMs = data.refreshIntervalMs || DEFAULT_REFRESH_INTERVAL;
     alertSubscriptions = data.alertSubscriptions || {};
+    setSessionState(data.session);
+    updateSessionUi();
 
-    if (fetchedAt !== lastFetchedAt) {
+    const dashboard = document.getElementById("dashboard");
+
+    if (fetchedAt !== lastFetchedAt || !dashboard.hasChildNodes()) {
       lastFetchedAt = fetchedAt;
-      accountOrder = data.accounts.map((a) => a.label);
-
-      const dashboard = document.getElementById("dashboard");
+      accountOrder = data.accounts.map((account) => account.label);
       dashboard.innerHTML = data.accounts.map(renderCard).join("");
 
       if (fetchedAt) {
@@ -177,7 +451,11 @@ async function refresh() {
 
       loadHistory(currentRange);
     }
-  } catch (err) {
+  } catch (error) {
+    if (error.status === 401) {
+      showLoginScreen();
+      return;
+    }
     document.getElementById("last-updated").textContent = "Failed to load";
   }
 
@@ -186,10 +464,11 @@ async function refresh() {
 
 function showSubscriptionFeedback(controls, message, isError = false) {
   const feedback = controls.querySelector(".subscription-feedback");
-  if (!feedback) return;
+  if (!feedback || sessionState.guest) return;
 
   feedback.textContent = message;
   feedback.classList.toggle("error", isError);
+  feedback.classList.remove("muted");
 
   window.setTimeout(() => {
     if (feedback.textContent === message) {
@@ -201,7 +480,7 @@ function showSubscriptionFeedback(controls, message, isError = false) {
 
 document.getElementById("dashboard").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-notification-key]");
-  if (!(button instanceof HTMLButtonElement)) {
+  if (!(button instanceof HTMLButtonElement) || sessionState.guest) {
     return;
   }
 
@@ -268,17 +547,9 @@ function startCountdown() {
   countdownTimer = setInterval(updateTimer, 1000);
 }
 
-// --- Charts ---
 const chartInstances = {};
 let currentRange = "1h";
-let accountOrder = []; // label order from config, set on each usage fetch
-
-const ACCOUNT_COLORS = [
-  { fiveHour: "#f97316", sevenDay: "#6366f1" },
-  { fiveHour: "#fb923c", sevenDay: "#818cf8" },
-  { fiveHour: "#fdba74", sevenDay: "#a5b4fc" },
-  { fiveHour: "#fed7aa", sevenDay: "#c7d2fe" },
-];
+let accountOrder = [];
 
 function formatChartTime(timestamp, range) {
   const d = new Date(timestamp);
@@ -291,19 +562,19 @@ function formatChartTime(timestamp, range) {
 function buildChartData(history, label, range) {
   const showFiveHour = range === "1h" || range === "5h";
   const points = history
-    .filter((s) => s.accounts.some((a) => a.label === label))
-    .map((s) => {
-      const acc = s.accounts.find((a) => a.label === label);
-      return { t: s.timestamp, fiveHour: acc.fiveHour, sevenDay: acc.sevenDay };
+    .filter((snapshot) => snapshot.accounts.some((account) => account.label === label))
+    .map((snapshot) => {
+      const account = snapshot.accounts.find((entry) => entry.label === label);
+      return { t: snapshot.timestamp, fiveHour: account.fiveHour, sevenDay: account.sevenDay };
     });
 
-  const labels = points.map((p) => formatChartTime(p.t, range));
+  const labels = points.map((point) => formatChartTime(point.t, range));
   const datasets = [];
 
   if (showFiveHour) {
     datasets.push({
       label: "5-hour session",
-      data: points.map((p) => p.fiveHour),
+      data: points.map((point) => point.fiveHour),
       borderColor: "#f97316",
       backgroundColor: "rgba(249,115,22,0.1)",
       tension: 0.3,
@@ -315,7 +586,7 @@ function buildChartData(history, label, range) {
 
   datasets.push({
     label: "7-day weekly",
-    data: points.map((p) => p.sevenDay),
+    data: points.map((point) => point.sevenDay),
     borderColor: "#6366f1",
     backgroundColor: "rgba(99,102,241,0.1)",
     tension: 0.3,
@@ -329,11 +600,10 @@ function buildChartData(history, label, range) {
 
 function renderCharts(history, range, order = []) {
   const chartsEl = document.getElementById("charts");
-  const inHistory = new Set(history.flatMap((s) => s.accounts.map((a) => a.label)));
-  // Use config order where available, append any unknown labels at the end.
+  const inHistory = new Set(history.flatMap((snapshot) => snapshot.accounts.map((account) => account.label)));
   const labels = [
-    ...order.filter((l) => inHistory.has(l)),
-    ...[...inHistory].filter((l) => !order.includes(l)),
+    ...order.filter((label) => inHistory.has(label)),
+    ...[...inHistory].filter((label) => !order.includes(label)),
   ];
 
   if (labels.length === 0) {
@@ -341,18 +611,17 @@ function renderCharts(history, range, order = []) {
     return;
   }
 
-  // Remove charts for accounts no longer present
   const existingLabels = new Set(Object.keys(chartInstances));
   const needed = new Set(labels);
-  for (const l of existingLabels) {
-    if (!needed.has(l)) {
-      chartInstances[l].destroy();
-      delete chartInstances[l];
+  for (const label of existingLabels) {
+    if (!needed.has(label)) {
+      chartInstances[label].destroy();
+      delete chartInstances[label];
     }
   }
 
   chartsEl.innerHTML = labels
-    .map((l) => `<div class="chart-card"><h3>${l}</h3><canvas id="chart-${CSS.escape(l)}"></canvas></div>`)
+    .map((label) => `<div class="chart-card"><h3>${label}</h3><canvas id="chart-${CSS.escape(label)}"></canvas></div>`)
     .join("");
 
   for (const label of labels) {
@@ -376,7 +645,7 @@ function renderCharts(history, range, order = []) {
           y: {
             min: 0,
             max: 100,
-            ticks: { color: "#6b7280", callback: (v) => v + "%" },
+            ticks: { color: "#6b7280", callback: (value) => value + "%" },
             grid: { color: "rgba(75,85,99,0.3)" },
           },
           x: {
@@ -411,12 +680,13 @@ async function loadHistory(range) {
   } catch {}
 }
 
-// Range button handlers
 document.querySelectorAll(".range-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".range-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".range-btn").forEach((button) => button.classList.remove("active"));
     btn.classList.add("active");
     currentRange = btn.dataset.range;
     loadHistory(currentRange);
   });
 });
+
+checkSession();
