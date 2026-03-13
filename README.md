@@ -37,16 +37,13 @@ Edit `config.json`:
 
 ```json
 {
-  "password": "your-strong-password",
   "sessionSecret": "random-secret-string",
   "port": 3000,
   "fetchIntervalMinutes": 10,
   "notifications": {
     "slack": {
       "enabled": true,
-      "botToken": "xoxb-...",
-      "channelId": "C0123456789",
-      "mention": "@here"
+      "botToken": "xoxb-..."
     }
   },
   "accounts": [
@@ -55,8 +52,6 @@ Edit `config.json`:
   ]
 }
 ```
-
-> **Important:** Set a non-empty `password` if the service is publicly accessible.
 
 ## Running
 
@@ -79,11 +74,13 @@ npm start
 
 ## API
 
-All endpoints except `POST /api/auth` require an active session (login first).
+All endpoints except `POST /api/auth` and `GET /api/session` require an active session.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/auth` | Login. Body: `{ "password": "..." }` |
+| `POST` | `/api/auth` | Login. Body: `{ "slackId": "U123..." }` or `{ "slackId": "" }` for guest mode |
+| `GET`  | `/api/session` | Current login state |
+| `POST` | `/api/logout` | Clear the current login session |
 | `GET`  | `/api/usage` | Latest usage snapshot for all accounts |
 | `GET`  | `/api/history?range=1h\|5h\|1d\|7d` | Historical snapshots within the given range |
 
@@ -126,14 +123,11 @@ History is stored as daily JSONL files (`data/history-YYYY-MM-DD.jsonl`, one JSO
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `password` | `""` (no auth) | Dashboard login password. Leave empty to disable auth. |
 | `sessionSecret` | `"cldmon-secret-change-me"` | Express session signing secret. Change this. |
 | `port` | `3000` | HTTP port to listen on. |
 | `fetchIntervalMinutes` | `10` | How often to poll claude.ai for fresh data (in minutes). See note below. |
 | `notifications.slack.enabled` | `false` | Enables Slack delivery for reset events. |
-| `notifications.slack.botToken` | `""` | Slack bot token (`xoxb-...`) with permission to post to the target channel. |
-| `notifications.slack.channelId` | `""` | Slack channel ID to receive reset messages. |
-| `notifications.slack.mention` | `""` | Optional mention prefix such as `@here` or `<!subteam^...>`. |
+| `notifications.slack.botToken` | `""` | Slack bot token (`xoxb-...`) with permission to post to user App Home or DM targets. |
 | `accounts` | `[]` | List of `{ label, sessionKey }` objects. |
 
 ## Slack reset notifications
@@ -150,10 +144,8 @@ To configure Slack:
 1. Create or use a Slack app with a bot user.
 2. Grant the bot `chat:write`.
 3. Install the app to your workspace.
-4. Invite the bot to the target channel.
-5. Put the bot token and channel ID into `config.json`.
-
-If you want to mention a group, set `mention` to the exact Slack mention string for that target.
+4. Make sure the bot can message the Slack users who will log in.
+5. Put the bot token into `config.json`.
 
 ## Slack alert subscriptions
 
@@ -161,8 +153,9 @@ Each account card has `Hit` and `Reset` alert toggles for Slack delivery.
 
 - `Hit` controls Slack messages when either the 5-hour or 7-day usage first reaches `100%`
 - `Reset` controls Slack messages when either window resets after previously being observed at `100%`
-- These preferences are stored server-side in `data/subscriptions.json`
+- Preferences are stored server-side in `data/subscriptions.json`, keyed by Slack ID
 - New accounts default to both alert types disabled
+- Leaving the Slack ID blank logs in as guest mode; alert toggles stay visually disabled and cannot be changed
 - Toggling a subscription sends a Slack confirmation message immediately
 
 ### Controlling the update rate
