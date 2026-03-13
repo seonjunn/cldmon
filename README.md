@@ -41,6 +41,14 @@ Edit `config.json`:
   "sessionSecret": "random-secret-string",
   "port": 3000,
   "fetchIntervalMinutes": 10,
+  "notifications": {
+    "slack": {
+      "enabled": true,
+      "botToken": "xoxb-...",
+      "channelId": "C0123456789",
+      "mention": "@here"
+    }
+  },
   "accounts": [
     { "label": "alice", "sessionKey": "sk-ant-sid02-..." },
     { "label": "bob",   "sessionKey": "sk-ant-sid02-..." }
@@ -115,7 +123,40 @@ History is stored as daily JSONL files (`data/history-YYYY-MM-DD.jsonl`, one JSO
 | `sessionSecret` | `"cldmon-secret-change-me"` | Express session signing secret. Change this. |
 | `port` | `3000` | HTTP port to listen on. |
 | `fetchIntervalMinutes` | `10` | How often to poll claude.ai for fresh data (in minutes). See note below. |
+| `notifications.slack.enabled` | `false` | Enables Slack delivery for reset events. |
+| `notifications.slack.botToken` | `""` | Slack bot token (`xoxb-...`) with permission to post to the target channel. |
+| `notifications.slack.channelId` | `""` | Slack channel ID to receive reset messages. |
+| `notifications.slack.mention` | `""` | Optional mention prefix such as `@here` or `<!subteam^...>`. |
 | `accounts` | `[]` | List of `{ label, sessionKey }` objects. |
+
+## Slack reset notifications
+
+The monitor can send a Slack message when Claude usage resets after a limit was fully consumed.
+
+- Limit hit: sends when utilization first reaches `100`
+- 5-hour session: sends only when utilization changes from `100` to `0`
+- 7-day weekly: sends only when utilization changes from `100` to `0`
+- Startup-safe: the app does not send messages on boot unless it previously observed the account at `100%`
+
+To configure Slack:
+
+1. Create or use a Slack app with a bot user.
+2. Grant the bot `chat:write`.
+3. Install the app to your workspace.
+4. Invite the bot to the target channel.
+5. Put the bot token and channel ID into `config.json`.
+
+If you want to mention a group, set `mention` to the exact Slack mention string for that target.
+
+## Slack alert subscriptions
+
+Each account card has `Hit` and `Reset` alert toggles for Slack delivery.
+
+- `Hit` controls Slack messages when either the 5-hour or 7-day usage first reaches `100%`
+- `Reset` controls Slack messages when either window resets after previously being observed at `100%`
+- These preferences are stored server-side in `data/subscriptions.json`
+- New accounts default to both alert types disabled
+- Toggling a subscription sends a Slack confirmation message immediately
 
 ### Controlling the update rate
 

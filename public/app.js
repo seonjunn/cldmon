@@ -5,6 +5,29 @@ let countdownTimer = null;
 let refreshTimer = null;
 let refreshIntervalMs = DEFAULT_REFRESH_INTERVAL;
 let lastFetchedAt = null;
+let alertSubscriptions = {};
+
+async function apiFetchJson(url, options) {
+  const res = await fetch(url, options);
+  const text = await res.text();
+
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(res.ok
+        ? "Server returned a non-JSON response. Restart the server and refresh the page."
+        : "Server returned an unexpected response. Restart the server and refresh the page.");
+    }
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.error || `Request failed (${res.status})`);
+  }
+
+  return data;
+}
 
 // --- Auth ---
 document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -14,15 +37,11 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
   errEl.textContent = "";
 
   try {
-    const res = await fetch("api/auth", {
+    await apiFetchJson("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: pw }),
     });
-    if (!res.ok) {
-      errEl.textContent = "Wrong password";
-      return;
-    }
     showDashboard();
   } catch {
     errEl.textContent = "Connection error";
@@ -31,8 +50,9 @@ document.getElementById("login-form").addEventListener("submit", async (e) => {
 
 async function checkSession() {
   try {
-    const res = await fetch("api/usage");
-    if (res.ok) { showDashboard(); return; }
+    await apiFetchJson("/api/usage");
+    showDashboard();
+    return;
   } catch {}
   // not authenticated — login screen stays visible
 }
@@ -71,6 +91,15 @@ function formatTimeUntil(isoString) {
 }
 
 function renderCard(account) {
+  const notificationSettings = alertSubscriptions[account.label] || { limitHit: false, reset: false };
+  const notificationControls = `
+      <div class="notification-controls" data-account-label="${account.label}">
+        <span class="notification-title">Slack alerts</span>
+        <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}">Hit</button>
+        <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}">Reset</button>
+        <span class="subscription-feedback" aria-live="polite"></span>
+      </div>`;
+
   if (account.status === "error") {
     return `
       <div class="card error">
@@ -78,6 +107,7 @@ function renderCard(account) {
           <span class="account-label">${account.label}</span>
           <span class="status-dot error"></span>
         </div>
+        ${notificationControls}
         <div class="error-msg">Token expired or invalid<br><small>${account.error}</small></div>
       </div>`;
   }
@@ -112,6 +142,7 @@ function renderCard(account) {
         </div>
         <div class="reset-time" data-resets="${sd.resetsAt || ""}">${formatTimeUntil(sd.resetsAt)}</div>
       </div>
+      ${notificationControls}
     </div>`;
 }
 
@@ -124,11 +155,11 @@ function updateCountdowns() {
 
 async function refresh() {
   try {
-    const res = await fetch("api/usage");
-    const data = await res.json();
+    const data = await apiFetchJson("/api/usage");
     const fetchedAt = data.fetchedAt || null;
 
     refreshIntervalMs = data.refreshIntervalMs || DEFAULT_REFRESH_INTERVAL;
+    alertSubscriptions = data.alertSubscriptions || {};
 
     if (fetchedAt !== lastFetchedAt) {
       lastFetchedAt = fetchedAt;
@@ -151,6 +182,61 @@ async function refresh() {
 
   startCountdown();
 }
+
+function showSubscriptionFeedback(controls, message, isError = false) {
+  const feedback = controls.querySelector(".subscription-feedback");
+  if (!feedback) return;
+
+  feedback.textContent = message;
+  feedback.classList.toggle("error", isError);
+
+  window.setTimeout(() => {
+    if (feedback.textContent === message) {
+      feedback.textContent = "";
+      feedback.classList.remove("error");
+    }
+  }, 1800);
+}
+
+document.getElementById("dashboard").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-notification-key]");
+  if (!(button instanceof HTMLButtonElement)) {
+    return;
+  }
+
+  const controls = button.closest("[data-account-label]");
+  const accountLabel = controls?.dataset.accountLabel;
+  if (!accountLabel) {
+    return;
+  }
+
+  const isActive = button.getAttribute("aria-pressed") === "true";
+  const nextEnabled = !isActive;
+
+  button.disabled = true;
+  showSubscriptionFeedback(controls, "Saving...");
+
+  try {
+    const data = await apiFetchJson("/api/subscriptions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: accountLabel,
+        key: button.dataset.notificationKey,
+        enabled: nextEnabled,
+      }),
+    });
+
+    alertSubscriptions[accountLabel] = data.subscription;
+    button.classList.toggle("active", nextEnabled);
+    button.setAttribute("aria-pressed", nextEnabled ? "true" : "false");
+    showSubscriptionFeedback(controls, nextEnabled ? "Subscribed" : "Unsubscribed");
+  } catch (error) {
+    showSubscriptionFeedback(controls, error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 function startCountdown() {
   const el = document.getElementById("next-refresh");
@@ -313,9 +399,7 @@ function renderCharts(history, range) {
 
 async function loadHistory(range) {
   try {
-    const res = await fetch(`api/history?range=${range}`);
-    if (!res.ok) return;
-    const history = await res.json();
+    const history = await apiFetchJson(`/api/history?range=${range}`);
     renderCharts(history, range);
   } catch {}
 }

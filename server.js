@@ -6,6 +6,13 @@ const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const { createUsageEventDetector } = require("./lib/usage-reset-detector");
+const { createNotificationDispatcher } = require("./notifications");
+const {
+  getAccountSubscriptions,
+  updateAccountSubscription,
+  isSubscribed,
+} = require("./lib/subscriptions");
 puppeteer.use(StealthPlugin());
 
 // ---------------------------------------------------------------------------
@@ -13,6 +20,13 @@ puppeteer.use(StealthPlugin());
 // ---------------------------------------------------------------------------
 const CONFIG_FILE = path.join(__dirname, "config.json");
 const FETCH_INTERVAL_MS = 10 * 60 * 1000; // 10 min
+const CHROME_CANDIDATES = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+].filter(Boolean);
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
@@ -27,11 +41,24 @@ function loadConfig() {
 // ---------------------------------------------------------------------------
 let browser = null;
 
+function resolveChromeExecutable() {
+  return CHROME_CANDIDATES.find((candidate) => fs.existsSync(candidate));
+}
+
 async function getBrowser() {
   if (!browser || !browser.connected) {
+    const executablePath = resolveChromeExecutable();
     browser = await puppeteer.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      executablePath,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+    }).catch((error) => {
+      browser = null;
+      throw error;
     });
   }
   return browser;
@@ -39,10 +66,9 @@ async function getBrowser() {
 
 async function claudeGetJson(urlPath, sessionKey) {
   const b = await getBrowser();
-  // Use an isolated context per request so cookies are never shared between
-  // accounts (default context shares a single cookie jar across all pages).
   const context = await b.createBrowserContext();
   const page = await context.newPage();
+
   try {
     await page.setCookie({
       name: "sessionKey",
@@ -165,10 +191,15 @@ const RANGE_MS = {
 // Usage cache
 // ---------------------------------------------------------------------------
 let cachedUsage = null;
+const usageEventDetector = createUsageEventDetector();
 
 async function refreshUsage() {
   const config = loadConfig();
   const accounts = await Promise.all(config.accounts.map(fetchAccountUsage));
+  const accountLabels = accounts.map((account) => account.label);
+  const alertSubscriptions = getAccountSubscriptions(accountLabels);
+  const usageEvents = usageEventDetector.detect(accounts);
+  const notificationDispatcher = createNotificationDispatcher(config);
   const snapshot = {
     timestamp: Date.now(),
     accounts: accounts
@@ -184,7 +215,12 @@ async function refreshUsage() {
     fetchedAt: new Date().toISOString(),
     accounts,
     refreshIntervalMs: FETCH_INTERVAL_MS,
+    alertSubscriptions,
   };
+  const subscribedEvents = usageEvents.filter((event) => isSubscribed(alertSubscriptions, event));
+  if (subscribedEvents.length > 0) {
+    await notificationDispatcher.notifyEvents(subscribedEvents);
+  }
   console.log(`[${new Date().toISOString()}] Refreshed usage for ${accounts.length} accounts`);
   return cachedUsage;
 }
@@ -226,12 +262,51 @@ function requireAuth(req, res, next) {
 
 // GET /api/usage — always returns 200; returns empty accounts while first fetch is in progress
 app.get("/api/usage", requireAuth, (req, res) => {
+  const config = loadConfig();
+  const accountLabels = config.accounts.map((account) => account.label);
   res.json(cachedUsage || {
     fetchedAt: null,
     accounts: [],
     loading: true,
     refreshIntervalMs: FETCH_INTERVAL_MS,
+    alertSubscriptions: getAccountSubscriptions(accountLabels),
   });
+});
+
+app.post("/api/subscriptions", requireAuth, (req, res) => {
+  const { label, key, enabled } = req.body || {};
+
+  if (!label || !["limitHit", "reset"].includes(key) || typeof enabled !== "boolean") {
+    res.status(400).json({ error: "Invalid subscription payload" });
+    return;
+  }
+
+  const config = loadConfig();
+  const accountExists = config.accounts.some((account) => account.label === label);
+  if (!accountExists) {
+    res.status(404).json({ error: "Unknown account" });
+    return;
+  }
+
+  const subscription = updateAccountSubscription(label, key, enabled);
+  const notificationDispatcher = createNotificationDispatcher(config);
+
+  if (cachedUsage) {
+    cachedUsage.alertSubscriptions = {
+      ...(cachedUsage.alertSubscriptions || {}),
+      [label]: subscription,
+    };
+  }
+
+  notificationDispatcher.notifySubscriptionChange({
+    accountLabel: label,
+    key,
+    enabled,
+  }).catch((error) => {
+    console.error(`[subscriptions] Failed to send Slack confirmation: ${error.message}`);
+  });
+
+  res.json({ ok: true, label, subscription });
 });
 
 // GET /api/history?range=1h|5h|1d|7d
@@ -246,9 +321,10 @@ app.get("/api/history", requireAuth, (req, res) => {
 // ---------------------------------------------------------------------------
 const config = loadConfig();
 const PORT = config.port || 3000;
+const HOST = config.host || "0.0.0.0";
 
-app.listen(PORT, () => {
-  console.log(`Claude Status Dashboard running at http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`Claude Status Dashboard running at http://${HOST}:${PORT}`);
   // Initial fetch
   refreshUsage().catch(console.error);
   // Schedule periodic refresh

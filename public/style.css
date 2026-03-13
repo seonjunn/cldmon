@@ -127,6 +127,63 @@ header h1 {
   text-align: right;
 }
 
+.notification-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 0.25rem;
+}
+
+.notification-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #7c8597;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 0.15rem;
+}
+
+.notification-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.74rem;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #2d3140;
+  border-radius: 999px;
+  background: transparent;
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+
+.notification-chip:hover {
+  border-color: #4b5563;
+  color: #d1d5db;
+}
+
+.notification-chip:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.notification-chip.active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.14);
+  color: #e0e7ff;
+}
+
+.subscription-feedback {
+  font-size: 0.72rem;
+  color: #6b7280;
+  min-width: 2.5rem;
+}
+
+.subscription-feedback.error {
+  color: #ef4444;
+}
+
 .error-msg {
   color: #ef4444;
   font-size: 0.8rem;
