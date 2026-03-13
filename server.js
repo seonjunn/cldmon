@@ -180,7 +180,11 @@ async function refreshUsage() {
       })),
   };
   appendHistory(snapshot);
-  cachedUsage = { fetchedAt: new Date().toISOString(), accounts };
+  cachedUsage = {
+    fetchedAt: new Date().toISOString(),
+    accounts,
+    refreshIntervalMs: FETCH_INTERVAL_MS,
+  };
   console.log(`[${new Date().toISOString()}] Refreshed usage for ${accounts.length} accounts`);
   return cachedUsage;
 }
@@ -222,7 +226,12 @@ function requireAuth(req, res, next) {
 
 // GET /api/usage — always returns 200; returns empty accounts while first fetch is in progress
 app.get("/api/usage", requireAuth, (req, res) => {
-  res.json(cachedUsage || { fetchedAt: null, accounts: [], loading: true });
+  res.json(cachedUsage || {
+    fetchedAt: null,
+    accounts: [],
+    loading: true,
+    refreshIntervalMs: FETCH_INTERVAL_MS,
+  });
 });
 
 // GET /api/history?range=1h|5h|1d|7d

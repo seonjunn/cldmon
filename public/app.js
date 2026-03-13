@@ -1,7 +1,10 @@
-const REFRESH_INTERVAL = 10 * 60_000; // 10 min
+const POLL_INTERVAL = 15_000;
+const DEFAULT_REFRESH_INTERVAL = 10 * 60_000; // 10 min
 
 let countdownTimer = null;
 let refreshTimer = null;
+let refreshIntervalMs = DEFAULT_REFRESH_INTERVAL;
+let lastFetchedAt = null;
 
 // --- Auth ---
 document.getElementById("login-form").addEventListener("submit", async (e) => {
@@ -38,7 +41,8 @@ function showDashboard() {
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app").style.display = "";
   refresh();
-  refreshTimer = setInterval(refresh, REFRESH_INTERVAL);
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(refresh, POLL_INTERVAL);
 }
 
 checkSession();
@@ -122,13 +126,25 @@ async function refresh() {
   try {
     const res = await fetch("api/usage");
     const data = await res.json();
+    const fetchedAt = data.fetchedAt || null;
 
-    const dashboard = document.getElementById("dashboard");
-    dashboard.innerHTML = data.accounts.map(renderCard).join("");
+    refreshIntervalMs = data.refreshIntervalMs || DEFAULT_REFRESH_INTERVAL;
 
-    const time = new Date(data.fetchedAt).toLocaleTimeString("ko-KR");
-    document.getElementById("last-updated").textContent = `updated ${time}`;
-    loadHistory(currentRange);
+    if (fetchedAt !== lastFetchedAt) {
+      lastFetchedAt = fetchedAt;
+
+      const dashboard = document.getElementById("dashboard");
+      dashboard.innerHTML = data.accounts.map(renderCard).join("");
+
+      if (fetchedAt) {
+        const time = new Date(fetchedAt).toLocaleTimeString("ko-KR");
+        document.getElementById("last-updated").textContent = `updated ${time}`;
+      } else {
+        document.getElementById("last-updated").textContent = "updating...";
+      }
+
+      loadHistory(currentRange);
+    }
   } catch (err) {
     document.getElementById("last-updated").textContent = "Failed to load";
   }
@@ -137,21 +153,32 @@ async function refresh() {
 }
 
 function startCountdown() {
-  let remaining = REFRESH_INTERVAL / 1000;
   const el = document.getElementById("next-refresh");
 
   if (countdownTimer) clearInterval(countdownTimer);
 
-  countdownTimer = setInterval(() => {
-    remaining--;
-    if (remaining <= 0) {
-      clearInterval(countdownTimer);
+  const updateTimer = () => {
+    if (!lastFetchedAt) {
       el.textContent = "refreshing...";
+      updateCountdowns();
       return;
     }
+
+    const nextRefreshAt = new Date(lastFetchedAt).getTime() + refreshIntervalMs;
+    const remaining = Math.ceil((nextRefreshAt - Date.now()) / 1000);
+
+    if (remaining <= 0) {
+      el.textContent = "refreshing...";
+      updateCountdowns();
+      return;
+    }
+
     el.textContent = `next refresh ${remaining}s`;
     updateCountdowns();
-  }, 1000);
+  };
+
+  updateTimer();
+  countdownTimer = setInterval(updateTimer, 1000);
 }
 
 // --- Charts ---
