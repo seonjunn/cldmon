@@ -163,6 +163,7 @@ async function refresh() {
 
     if (fetchedAt !== lastFetchedAt) {
       lastFetchedAt = fetchedAt;
+      accountOrder = data.accounts.map((a) => a.label);
 
       const dashboard = document.getElementById("dashboard");
       dashboard.innerHTML = data.accounts.map(renderCard).join("");
@@ -270,6 +271,7 @@ function startCountdown() {
 // --- Charts ---
 const chartInstances = {};
 let currentRange = "1h";
+let accountOrder = []; // label order from config, set on each usage fetch
 
 const ACCOUNT_COLORS = [
   { fiveHour: "#f97316", sevenDay: "#6366f1" },
@@ -325,9 +327,14 @@ function buildChartData(history, label, range) {
   return { labels, datasets };
 }
 
-function renderCharts(history, range) {
+function renderCharts(history, range, order = []) {
   const chartsEl = document.getElementById("charts");
-  const labels = [...new Set(history.flatMap((s) => s.accounts.map((a) => a.label)))];
+  const inHistory = new Set(history.flatMap((s) => s.accounts.map((a) => a.label)));
+  // Use config order where available, append any unknown labels at the end.
+  const labels = [
+    ...order.filter((l) => inHistory.has(l)),
+    ...[...inHistory].filter((l) => !order.includes(l)),
+  ];
 
   if (labels.length === 0) {
     chartsEl.innerHTML = '<div class="chart-empty">No history data yet</div>';
@@ -400,7 +407,7 @@ function renderCharts(history, range) {
 async function loadHistory(range) {
   try {
     const history = await apiFetchJson(`/api/history?range=${range}`);
-    renderCharts(history, range);
+    renderCharts(history, range, accountOrder);
   } catch {}
 }
 
