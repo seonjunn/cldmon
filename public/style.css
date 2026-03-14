@@ -250,6 +250,11 @@ header h1 {
   color: #60697a;
 }
 
+.chip-wrapper {
+  display: inline-flex;
+  gap: 0.5rem;
+}
+
 .guest-chip-wrapper {
   position: relative;
 }

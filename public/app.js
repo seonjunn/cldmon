@@ -384,7 +384,7 @@ function renderNotificationControls(accountLabel) {
   return `
     <div class="notification-controls ${guestClass}" data-account-label="${accountLabel}">
       <span class="notification-title">Slack alerts</span>
-      <span class="${guestClass ? "guest-chip-wrapper" : ""}">
+      <span class="chip-wrapper${guestClass ? " guest-chip-wrapper" : ""}">
         <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}" ${disabledAttr}>Hit</button>
         <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}" ${disabledAttr}>Reset</button>
       </span>
