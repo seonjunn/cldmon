@@ -381,15 +381,14 @@ function renderNotificationControls(accountLabel) {
   const notificationSettings = alertSubscriptions[accountLabel] || { limitHit: false, reset: false };
   const guestClass = sessionState.guest ? "guest" : "";
   const disabledAttr = sessionState.guest ? "disabled" : "";
-  const guestMessage = sessionState.guest ? "Guest mode" : "";
-  const feedbackClass = sessionState.guest ? "subscription-feedback muted" : "subscription-feedback";
-
   return `
     <div class="notification-controls ${guestClass}" data-account-label="${accountLabel}">
       <span class="notification-title">Slack alerts</span>
-      <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}" ${disabledAttr}>Hit</button>
-      <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}" ${disabledAttr}>Reset</button>
-      <span class="${feedbackClass}" aria-live="polite">${guestMessage}</span>
+      <span class="${guestClass ? "guest-chip-wrapper" : ""}">
+        <button type="button" class="notification-chip ${notificationSettings.limitHit ? "active" : ""}" data-notification-key="limitHit" aria-pressed="${notificationSettings.limitHit ? "true" : "false"}" ${disabledAttr}>Hit</button>
+        <button type="button" class="notification-chip ${notificationSettings.reset ? "active" : ""}" data-notification-key="reset" aria-pressed="${notificationSettings.reset ? "true" : "false"}" ${disabledAttr}>Reset</button>
+      </span>
+      <span class="subscription-feedback" aria-live="polite"></span>
     </div>`;
 }
 
