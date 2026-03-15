@@ -1,4 +1,5 @@
 {
+  "_sessionSecretHint": "Run ./generate-secret.sh to generate a value for sessionSecret",
   "sessionSecret": "replace-with-a-long-random-string",
   "port": 3000,
   "notifications": {
