@@ -1,6 +1,5 @@
 {
-  "_sessionSecretHint": "Run ./generate-secret.sh to generate a value for sessionSecret",
-  "sessionSecret": "replace-with-a-long-random-string",
+"sessionSecret": "run ./generate-secret.sh and paste output here",
   "port": 3000,
   "notifications": {
     "slack": {
