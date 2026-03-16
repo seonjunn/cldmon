@@ -87,14 +87,6 @@ header h1 {
     justify-content: flex-start;
   }
 
-  .notification-controls {
-    flex-wrap: wrap;
-  }
-
-  .subscription-feedback {
-    flex-basis: 100%;
-    text-align: left;
-  }
 }
 
 #dashboard {
@@ -195,6 +187,7 @@ header h1 {
 
 .notification-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   margin-top: 1rem;
@@ -290,9 +283,8 @@ header h1 {
 .subscription-feedback {
   font-size: 0.72rem;
   color: #6b7280;
-  min-width: 6.5rem;
+  flex-basis: 100%;
   min-height: 1em;
-  text-align: right;
   white-space: nowrap;
 }
 
