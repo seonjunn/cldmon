@@ -1,5 +1,6 @@
 {
 "sessionSecret": "run ./generate-secret.sh and paste output here",
+  "appName": "cldmon",
   "port": 3000,
   "notifications": {
     "slack": {
