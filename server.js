@@ -616,6 +616,7 @@ readSlackUsersCacheFromDisk();
 app.use(express.json());
 app.use(
   session({
+    name: `cldmon-sid-${loadConfig().port || 3000}`,
     secret: loadConfig().sessionSecret || "cldmon-secret-change-me",
     resave: false,
     saveUninitialized: false,
