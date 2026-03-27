@@ -345,6 +345,21 @@ header h1 {
   width: 100%;
 }
 
+#password-input {
+  width: 100%;
+  background: #0f1117;
+  border: 1px solid #2d3140;
+  border-radius: 8px;
+  padding: 0.6rem 0.875rem;
+  color: #e1e4e8;
+  font-size: 0.9rem;
+  outline: none;
+}
+
+#password-input:focus {
+  border-color: #6366f1;
+}
+
 #slack-id-input {
   width: 100%;
   background: #0f1117;

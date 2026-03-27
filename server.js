@@ -646,8 +646,25 @@ app.get("/api/slack/users", async (req, res) => {
 
 // POST /api/auth
 app.post("/api/auth", async (req, res) => {
+  const config = loadConfig();
+  const configPassword = typeof config.password === "string" ? config.password : "";
+
+  if (configPassword) {
+    const submittedPassword = typeof req.body?.password === "string" ? req.body.password : "";
+    if (submittedPassword !== configPassword) {
+      res.status(401).json({ error: "Incorrect password" });
+      return;
+    }
+  }
+
   if (!isSlackEnabled()) {
-    res.status(404).json({ error: "Slack login is disabled" });
+    req.session.authenticated = true;
+    req.session.slackId = "";
+    req.session.slackName = "";
+    res.json({
+      ok: true,
+      session: getSessionState(req),
+    });
     return;
   }
 
@@ -684,8 +701,13 @@ app.post("/api/auth", async (req, res) => {
   }
 });
 
+function isPasswordEnabled(config = loadConfig()) {
+  const pw = typeof config.password === "string" ? config.password : "";
+  return pw.length > 0;
+}
+
 function requireAuth(req, res, next) {
-  if (!isSlackEnabled()) return next();
+  if (!isSlackEnabled() && !isPasswordEnabled()) return next();
   if (req.session?.authenticated) return next();
   res.status(401).json({ error: "Unauthorized" });
 }
@@ -694,11 +716,12 @@ app.get("/api/session", (req, res) => {
   res.json({
     ...getSessionState(req),
     slackEnabled: isSlackEnabled(),
+    passwordEnabled: isPasswordEnabled(),
   });
 });
 
 app.post("/api/logout", requireAuth, (req, res) => {
-  if (!isSlackEnabled()) {
+  if (!isSlackEnabled() && !isPasswordEnabled()) {
     res.json({ ok: true });
     return;
   }

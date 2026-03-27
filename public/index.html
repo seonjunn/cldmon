@@ -12,8 +12,9 @@
     <div class="login-box">
       <h2>Claude Status Dashboard</h2>
       <p>Type your name for Slack alerts.<br>Leave empty for guest mode.</p>
-      <div id="login-form" role="group" aria-label="Slack member entry">
-        <div class="login-input-wrap">
+      <div id="login-form" role="group" aria-label="Login">
+        <input type="password" id="password-input" placeholder="Password" autocomplete="current-password" hidden>
+        <div class="login-input-wrap" id="slack-input-wrap">
           <input type="text" id="slack-id-input" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="search" autofocus>
           <div id="slack-user-menu" class="slack-user-menu" hidden></div>
         </div>

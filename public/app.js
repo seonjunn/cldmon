@@ -16,6 +16,7 @@ let sessionState = {
   slackName: "",
 };
 let slackEnabled = true;
+let passwordEnabled = false;
 let slackSearchTimer = null;
 let slackSearchRequestId = 0;
 let slackUsers = [];
@@ -23,6 +24,8 @@ let highlightedSlackUserIndex = -1;
 let selectedSlackUser = null;
 
 const loginForm = document.getElementById("login-form");
+const passwordInput = document.getElementById("password-input");
+const slackInputWrap = document.getElementById("slack-input-wrap");
 const slackIdInput = document.getElementById("slack-id-input");
 const slackUserMenu = document.getElementById("slack-user-menu");
 const loginError = document.getElementById("login-error");
@@ -65,8 +68,13 @@ function setSessionState(nextState) {
 function updateSessionUi() {
   const sessionBar = document.querySelector(".session-bar");
   const sessionLabel = document.getElementById("session-label");
+  const showBar = slackEnabled || passwordEnabled;
   if (sessionBar) {
-    sessionBar.style.display = slackEnabled ? "" : "none";
+    sessionBar.style.display = showBar ? "" : "none";
+  }
+  if (!showBar) {
+    sessionLabel.textContent = "";
+    return;
   }
   if (!slackEnabled) {
     sessionLabel.textContent = "";
@@ -164,7 +172,7 @@ function scheduleSlackSearch() {
 }
 
 function showLoginScreen() {
-  if (!slackEnabled) {
+  if (!slackEnabled && !passwordEnabled) {
     showDashboard();
     return;
   }
@@ -180,10 +188,35 @@ function showLoginScreen() {
   document.getElementById("dashboard").innerHTML = "";
   document.getElementById("charts").innerHTML = "";
   loginError.textContent = "";
-  slackIdInput.value = "";
-  clearSlackSelection();
-  hideSlackUserMenu();
-  slackIdInput.focus();
+
+  const loginDesc = document.querySelector(".login-box p");
+
+  if (passwordEnabled) {
+    passwordInput.hidden = false;
+    passwordInput.value = "";
+  } else {
+    passwordInput.hidden = true;
+  }
+
+  if (slackEnabled) {
+    slackInputWrap.hidden = false;
+    slackIdInput.value = "";
+    clearSlackSelection();
+    hideSlackUserMenu();
+    if (loginDesc) {
+      loginDesc.textContent = passwordEnabled
+        ? "Enter password and your name for Slack alerts."
+        : "Type your name for Slack alerts. Leave empty for guest mode.";
+    }
+  } else {
+    slackInputWrap.hidden = true;
+    if (loginDesc) {
+      loginDesc.textContent = "Enter the password to continue.";
+    }
+  }
+
+  const firstInput = passwordEnabled ? passwordInput : slackIdInput;
+  firstInput.focus();
 }
 
 function showDashboard() {
@@ -280,21 +313,31 @@ slackIdInput.addEventListener("blur", () => {
 async function submitLogin() {
   loginError.textContent = "";
 
-  const enteredValue = slackIdInput.value.trim();
-  if (enteredValue && !selectedSlackUser) {
-    if (slackUsers.length === 1) {
-      applySlackUserSelection(slackUsers[0]);
-    } else {
-      loginError.textContent = "Pick an exact Slack name from the autocomplete list, or leave it empty for guest mode.";
-      return;
+  if (slackEnabled) {
+    const enteredValue = slackIdInput.value.trim();
+    if (enteredValue && !selectedSlackUser) {
+      if (slackUsers.length === 1) {
+        applySlackUserSelection(slackUsers[0]);
+      } else {
+        loginError.textContent = "Pick an exact Slack name from the autocomplete list, or leave it empty for guest mode.";
+        return;
+      }
     }
+  }
+
+  const payload = {};
+  if (passwordEnabled) {
+    payload.password = passwordInput.value;
+  }
+  if (slackEnabled) {
+    payload.slackId = selectedSlackUser?.id || "";
   }
 
   try {
     const data = await apiFetchJson("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slackId: selectedSlackUser?.id || "" }),
+      body: JSON.stringify(payload),
     });
     setSessionState(data.session);
     showDashboard();
@@ -331,9 +374,10 @@ async function checkSession() {
   try {
     const data = await apiFetchJson("/api/session");
     slackEnabled = data?.slackEnabled !== false;
+    passwordEnabled = data?.passwordEnabled === true;
     setSessionState(data);
     updateSessionUi();
-    if (!slackEnabled) {
+    if (!slackEnabled && !passwordEnabled) {
       showDashboard();
       return;
     }
