@@ -795,7 +795,17 @@ app.post("/api/subscriptions", requireAuth, (req, res) => {
 app.get("/api/history", requireAuth, (req, res) => {
   const range = req.query.range || "1h";
   const rangeMs = RANGE_MS[range] || RANGE_MS["1h"];
-  res.json(readHistory(rangeMs));
+  const history = readHistory(rangeMs);
+
+  // Filter to only accounts currently in config.json
+  const config = loadConfig();
+  const activeLabels = new Set(config.accounts.map((a) => a.label));
+  const filtered = history.map((snap) => ({
+    ...snap,
+    accounts: snap.accounts.filter((a) => activeLabels.has(a.label)),
+  }));
+
+  res.json(filtered);
 });
 
 // ---------------------------------------------------------------------------
