@@ -47,6 +47,7 @@ pm2 is wired to systemd (`pm2-seonjunkim.service`) and will auto-start on reboot
 ## Architecture notes
 
 - Puppeteer launches a headless Chrome per poll cycle, injects the `sessionKey` cookie, hits `/api/organizations` then `/api/organizations/{uuid}/usage`, and closes the page
+- An account can belong to several orgs (an unused team org may be listed first), so usage is fetched for every org and the one with the highest 7d (then 5h) utilization is shown; set `org` (uuid or name) on an account to pin one
 - `cachedUsage` is an in-memory variable; history is persisted to daily files (`data/history-YYYY-MM-DD.jsonl`)
 - Poll interval is `FETCH_INTERVAL_MS` (hardcoded at top of `server.js`); `fetchIntervalMinutes` in config.json is the intended override but requires wiring into the server (currently hardcoded)
 - Sessions use `express-session` with in-memory store; sessions are lost on restart
@@ -59,7 +60,7 @@ pm2 is wired to systemd (`pm2-seonjunkim.service`) and will auto-start on reboot
   "sessionSecret": "...",   // express-session secret
   "port": 3000,
   "accounts": [
-    { "label": "alice", "sessionKey": "sk-ant-sid02-..." }
+    { "label": "alice", "sessionKey": "sk-ant-sid02-...", "org": "optional uuid or name" }
   ]
 }
 ```

@@ -425,22 +425,47 @@ async function fetchAccountUsage(account) {
   const { label, sessionKey } = account;
 
   try {
-    // Step 1: Get org UUID
+    // Step 1: Get org UUIDs
     const orgsData = await claudeGetJson("/api/organizations", sessionKey);
-    const orgs = Array.isArray(orgsData) ? orgsData : (orgsData?.organizations || []);
-    const orgId = orgs[0]?.uuid || orgs[0]?.id;
+    let orgs = (Array.isArray(orgsData) ? orgsData : (orgsData?.organizations || []))
+      .filter((o) => o?.uuid || o?.id);
 
-    if (!orgId) {
+    // Optional `org` in config pins a specific org by uuid or name
+    if (account.org) {
+      orgs = orgs.filter((o) => [o.uuid, o.id, o.name].includes(account.org));
+    }
+
+    if (orgs.length === 0) {
       console.error(`[${label}] /api/organizations response:`, JSON.stringify(orgsData).slice(0, 200));
-      return { label, status: "error", error: "Could not find organization ID" };
+      return { label, status: "error", error: account.org ? `Organization not found: ${account.org}` : "Could not find organization ID" };
     }
 
     // Step 2: Get usage — response: { five_hour: { utilization, resets_at }, seven_day: { utilization, resets_at } }
-    const data = await claudeGetJson(`/api/organizations/${orgId}/usage`, sessionKey);
+    // An account can belong to several orgs (e.g. an unused team org listed first), so
+    // query each one and keep the org with the highest usage.
+    const candidates = [];
+    for (const org of orgs) {
+      const orgId = org.uuid || org.id;
+      const usage = await claudeGetJson(`/api/organizations/${orgId}/usage`, sessionKey).catch(() => null);
+      if (usage?.five_hour || usage?.seven_day) candidates.push({ org, usage });
+    }
+
+    if (candidates.length === 0) {
+      return { label, status: "error", error: "No organization returned usage data" };
+    }
+
+    const score = ({ usage }) => [usage.seven_day?.utilization ?? 0, usage.five_hour?.utilization ?? 0];
+    candidates.sort((a, b) => {
+      const [a7, a5] = score(a);
+      const [b7, b5] = score(b);
+      return b7 - a7 || b5 - a5;
+    });
+    const { org, usage: data } = candidates[0];
 
     return {
       label,
       status: "ok",
+      orgName: org.name,
       fiveHour: {
         utilization: Math.round(data.five_hour?.utilization ?? 0),
         resetsAt: data.five_hour?.resets_at ?? null,
