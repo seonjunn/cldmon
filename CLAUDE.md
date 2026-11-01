@@ -10,7 +10,7 @@ Node.js + Express dashboard that scrapes claude.ai usage data via Puppeteer (ste
 - `config.json` — runtime config (accounts, password, port, interval); re-read on each poll, no restart needed for account changes
 - `data/history-YYYY-MM-DD.jsonl` — append-only JSONL history, one file per day
 - `public/` — static frontend (vanilla JS + Chart.js)
-- `ecosystem.config.js` — pm2 config
+- `service.sh` — systemd user service commands
 
 ## Setup commands (must run in order)
 
@@ -23,26 +23,17 @@ node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrom
 
 ## Running
 
-**NEVER run `node server.js` directly.** This has caused repeated incidents where a stray bare process holds port 3000 while pm2's managed process silently fails to bind — resulting in the old code serving requests while the new code appears to be running. The only safe way to run this server is through pm2.
+Use the systemd user service, matching the other local services. Never launch a separate `node server.js` process or add this app back to PM2.
 
 ```sh
-npx pm2 status                        # check if running
-npx pm2 logs cldmon                   # tail logs
-npx pm2 restart cldmon               # restart after code changes
-npx pm2 stop cldmon                  # stop
-npx pm2 start ecosystem.config.js    # start if not running
+./service.sh start
+./service.sh restart
+./service.sh stop
+./service.sh status
+./service.sh logs
 ```
 
-Before any restart, verify no stray processes are competing:
-
-```sh
-ps aux | grep "node server" | grep -v grep   # should show only the pm2-managed pid
-ss -tlnp | grep 3000                         # should show that pid on port 3000
-```
-
-If a stray process is found, kill it with `kill -9 <PID>` before restarting pm2.
-
-pm2 is wired to systemd (`pm2-seonjunkim.service`) and will auto-start on reboot. After any change to the process list, run `npx pm2 save` to persist it.
+The unit is `~/.config/systemd/user/cldmon.service`. It is enabled for boot; user lingering is enabled. Check `ss -tlnp | grep 3000` when diagnosing port conflicts. PM2 no longer manages this app.
 
 ## Architecture notes
 

@@ -56,22 +56,17 @@ Edit `config.json`:
 
 ## Running
 
+Managed by the systemd user unit `cldmon.service`, with automatic restart and boot startup.
+
 ```sh
-# Production (pm2 — use this)
-npx pm2 start ecosystem.config.js
-npx pm2 save
-npx pm2 startup   # follow the printed command to register with systemd
-
-# Common pm2 commands
-npx pm2 status
-npx pm2 logs cldmon
-npx pm2 restart cldmon
-
-# Development only (foreground, no auto-restart)
-npm start
+./service.sh start
+./service.sh status
+./service.sh logs
+./service.sh restart
+./service.sh stop
 ```
 
-> **Always use pm2 in production.** Running `node server.js` directly gives no auto-restart on crashes or reboots.
+Do not run a separate Node process or start the app through PM2; it will compete for port 3000.
 
 ## API
 

@@ -24,7 +24,7 @@ ok() {
 }
 
 # 1. Process check
-if ! pgrep -f "node server.js" > /dev/null; then
+if ! pgrep -f "node (.*\/)?server\.js" > /dev/null; then
   fail "server process not found"
 fi
 
