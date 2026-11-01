@@ -396,11 +396,22 @@ function getStatusColor(utilization) {
   return "green";
 }
 
-function getStatusDotClass(fiveHour, sevenDay) {
-  const max = Math.max(fiveHour, sevenDay);
+function getStatusDotClass(windows) {
+  const max = Math.max(0, ...windows.map((window) => window.utilization));
   if (max >= 85) return "critical";
   if (max >= 60) return "warn";
   return "";
+}
+
+function getUsageWindows(account) {
+  if (Array.isArray(account.usageWindows)) {
+    return account.usageWindows;
+  }
+
+  return [
+    account.fiveHour && { key: "300m", label: "5-hour session", durationMins: 300, ...account.fiveHour },
+    account.sevenDay && { key: "10080m", label: "7-day weekly", durationMins: 10_080, ...account.sevenDay },
+  ].filter(Boolean);
 }
 
 function formatTimeUntil(isoString) {
@@ -417,11 +428,12 @@ function formatResetLine(isoString) {
   return formatTimeUntil(isoString) || "\u00A0";
 }
 
-function renderNotificationControls(accountLabel) {
-  if (!slackEnabled) {
+function renderNotificationControls(account) {
+  if (!slackEnabled || account.provider === "codex") {
     return "";
   }
 
+  const accountLabel = account.label;
   const notificationSettings = alertSubscriptions[accountLabel] || { limitHit: false, reset: false };
   const guestClass = sessionState.guest ? "guest" : "";
   const disabledAttr = sessionState.guest ? "disabled" : "";
@@ -437,13 +449,15 @@ function renderNotificationControls(accountLabel) {
 }
 
 function renderCard(account) {
-  const notificationControls = renderNotificationControls(account.label);
+  const notificationControls = renderNotificationControls(account);
+  const provider = account.provider || "claude";
+  const providerBadge = `<span class="provider-badge ${provider}">${provider}</span>`;
 
   if (account.status === "error") {
     return `
       <div class="card error">
         <div class="card-header">
-          <span class="account-label">${account.label}</span>
+          <span class="account-identity"><span class="account-label">${account.label}</span>${providerBadge}</span>
           <span class="status-dot error"></span>
         </div>
         ${notificationControls}
@@ -451,36 +465,40 @@ function renderCard(account) {
       </div>`;
   }
 
-  const fh = account.fiveHour;
-  const sd = account.sevenDay;
-  const dotClass = getStatusDotClass(fh.utilization, sd.utilization);
+  const windows = getUsageWindows(account);
+  const dotClass = getStatusDotClass(windows);
+  const renderUsageSection = (window) => `
+      <div class="usage-section">
+        <div class="usage-label">
+          <span>${window.label}</span>
+          <span class="usage-pct">${window.utilization}%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill ${getStatusColor(window.utilization)}" style="width:${window.utilization}%"></div>
+        </div>
+        <div class="reset-time" data-resets="${window.resetsAt || ""}">${formatResetLine(window.resetsAt)}</div>
+      </div>`;
+  let usageSections;
+  if (provider === "codex") {
+    const fiveHour = windows.find((window) => window.durationMins === 300);
+    const weekly = windows.find((window) => window.durationMins === 10_080);
+    const otherWindows = windows.filter((window) => ![300, 10_080].includes(window.durationMins));
+    usageSections = [
+      fiveHour ? renderUsageSection(fiveHour) : '',
+      weekly ? renderUsageSection(weekly) : '',
+      ...otherWindows.map(renderUsageSection),
+    ].join("");
+  } else {
+    usageSections = windows.map(renderUsageSection).join("");
+  }
 
   return `
     <div class="card">
       <div class="card-header">
-        <span class="account-label">${account.label}</span>
+        <span class="account-identity"><span class="account-label">${account.label}</span>${providerBadge}</span>
         <span class="status-dot ${dotClass}"></span>
       </div>
-      <div class="usage-section">
-        <div class="usage-label">
-          <span>5-hour session</span>
-          <span class="usage-pct">${fh.utilization}%</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill ${getStatusColor(fh.utilization)}" style="width:${fh.utilization}%"></div>
-        </div>
-        <div class="reset-time" data-resets="${fh.resetsAt || ""}">${formatResetLine(fh.resetsAt)}</div>
-      </div>
-      <div class="usage-section">
-        <div class="usage-label">
-          <span>7-day weekly</span>
-          <span class="usage-pct">${sd.utilization}%</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill ${getStatusColor(sd.utilization)}" style="width:${sd.utilization}%"></div>
-        </div>
-        <div class="reset-time" data-resets="${sd.resetsAt || ""}">${formatResetLine(sd.resetsAt)}</div>
-      </div>
+      ${usageSections || '<div class="error-msg">No usage limits reported</div>'}
       ${notificationControls}
     </div>`;
 }
@@ -508,6 +526,10 @@ async function refresh() {
     if (fetchedAt !== lastFetchedAt || !dashboard.hasChildNodes()) {
       lastFetchedAt = fetchedAt;
       accountOrder = data.accounts.map((account) => account.label);
+      currentWindowKeys = new Map(data.accounts
+        .filter((account) => account.status === "ok")
+        .map((account) => [account.label, new Set(getUsageWindows(account).map((window) => window.key))]));
+      dashboard.style.setProperty("--account-count", Math.max(data.accounts.length, 1));
       dashboard.innerHTML = data.accounts.map(renderCard).join("");
 
       if (fetchedAt) {
@@ -622,6 +644,7 @@ function startCountdown() {
 const chartInstances = {};
 let currentRange = "1h";
 let accountOrder = [];
+let currentWindowKeys = new Map();
 
 function formatChartTime(timestamp, range) {
   const d = new Date(timestamp);
@@ -632,42 +655,50 @@ function formatChartTime(timestamp, range) {
 }
 
 function buildChartData(history, label, range) {
-  const showFiveHour = range === "1h" || range === "5h";
   const points = history
     .filter((snapshot) => snapshot.accounts.some((account) => account.label === label))
     .map((snapshot) => {
       const account = snapshot.accounts.find((entry) => entry.label === label);
-      return { t: snapshot.timestamp, fiveHour: account.fiveHour, sevenDay: account.sevenDay };
+      const windows = Array.isArray(account.windows)
+        ? account.windows
+        : [
+            account.fiveHour !== undefined && { key: "300m", label: "5-hour session", durationMins: 300, utilization: account.fiveHour },
+            account.sevenDay !== undefined && { key: "10080m", label: "7-day weekly", durationMins: 10_080, utilization: account.sevenDay },
+          ].filter(Boolean);
+      return { t: snapshot.timestamp, windows };
     });
 
-  const labels = points.map((point) => formatChartTime(point.t, range));
-  const datasets = [];
-
-  if (showFiveHour) {
-    datasets.push({
-      label: "5-hour session",
-      data: points.map((point) => point.fiveHour),
-      borderColor: "#f97316",
-      backgroundColor: "rgba(249,115,22,0.1)",
-      tension: 0.3,
-      pointRadius: 0,
-      borderWidth: 2,
-      fill: true,
-    });
+  const windowsByKey = new Map();
+  for (const point of points) {
+    for (const window of point.windows) {
+      windowsByKey.set(window.key, window);
+    }
   }
 
-  datasets.push({
-    label: "7-day weekly",
-    data: points.map((point) => point.sevenDay),
-    borderColor: "#6366f1",
-    backgroundColor: "rgba(99,102,241,0.1)",
-    tension: 0.3,
-    pointRadius: 0,
-    borderWidth: 2,
-    fill: true,
-  });
+  const palette = [
+    ["#f97316", "rgba(249,115,22,0.1)"],
+    ["#6366f1", "rgba(99,102,241,0.1)"],
+    ["#14b8a6", "rgba(20,184,166,0.1)"],
+  ];
+  const datasets = [...windowsByKey.values()]
+    .filter((window) => !currentWindowKeys.has(label) || currentWindowKeys.get(label).has(window.key))
+    .sort((a, b) => a.durationMins - b.durationMins)
+    .map((window) => ({
+      label: window.label,
+      data: points.map((point) => ({
+        x: point.t,
+        y: point.windows.find((candidate) => candidate.key === window.key)?.utilization ?? null,
+      })),
+      borderColor: palette[(window.durationMins === 300 ? 0 : window.durationMins === 10_080 ? 1 : 2)][0],
+      backgroundColor: palette[(window.durationMins === 300 ? 0 : window.durationMins === 10_080 ? 1 : 2)][1],
+      tension: 0,
+      pointRadius: points.length === 1 ? 3 : 0,
+      borderWidth: 2,
+      fill: true,
+      spanGaps: false,
+    }));
 
-  return { labels, datasets };
+  return { datasets };
 }
 
 function renderCharts(history, range, order = []) {
@@ -721,7 +752,9 @@ function renderCharts(history, range, order = []) {
             grid: { color: "rgba(75,85,99,0.3)" },
           },
           x: {
+            type: "linear",
             ticks: {
+              callback: (value) => formatChartTime(value, range),
               color: "#6b7280",
               maxTicksLimit: 8,
               maxRotation: 0,
@@ -735,6 +768,7 @@ function renderCharts(history, range, order = []) {
           },
           tooltip: {
             callbacks: {
+              title: (items) => items.length ? formatChartTime(items[0].parsed.x, range) : "",
               label: (ctx) => `${ctx.dataset.label}: ${ctx.parsed.y}%`,
             },
           },

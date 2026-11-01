@@ -10,6 +10,10 @@
       "memberChannelId": "C0123456789"
     }
   },
+  "codex": {
+    "enabled": false,
+    "ccsCommand": "ccs"
+  },
   "accounts": [
     {
       "label": "alice",

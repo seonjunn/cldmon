@@ -7,6 +7,7 @@ const https = require("https");
 const path = require("path");
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const { fetchCcsCodexAccounts } = require("./lib/codex-usage");
 const { createUsageEventDetector } = require("./lib/usage-reset-detector");
 const { createNotificationDispatcher } = require("./notifications");
 const {
@@ -464,6 +465,7 @@ async function fetchAccountUsage(account) {
 
     return {
       label,
+      provider: "claude",
       status: "ok",
       orgName: org.name,
       fiveHour: {
@@ -474,6 +476,22 @@ async function fetchAccountUsage(account) {
         utilization: Math.round(data.seven_day?.utilization ?? 0),
         resetsAt: data.seven_day?.resets_at ?? null,
       },
+      usageWindows: [
+        {
+          key: "300m",
+          label: "5-hour session",
+          utilization: Math.round(data.five_hour?.utilization ?? 0),
+          resetsAt: data.five_hour?.resets_at ?? null,
+          durationMins: 300,
+        },
+        {
+          key: "10080m",
+          label: "7-day weekly",
+          utilization: Math.round(data.seven_day?.utilization ?? 0),
+          resetsAt: data.seven_day?.resets_at ?? null,
+          durationMins: 10_080,
+        },
+      ],
     };
   } catch (err) {
     console.error(`[${label}] fetchAccountUsage error:`, err.message);
@@ -604,8 +622,16 @@ async function validateSlackConfig(config) {
 
 async function refreshUsage() {
   const config = loadConfig();
-  const accounts = await Promise.all(config.accounts.map(fetchAccountUsage));
-  const usageEvents = usageEventDetector.detect(accounts);
+  const claudeAccounts = await Promise.all((config.accounts || []).map(fetchAccountUsage));
+  const codexAccounts = config.codex?.enabled
+    ? await fetchCcsCodexAccounts(config.codex).catch((error) => {
+      console.error("[codex] Failed to refresh usage:", error);
+      return [];
+    })
+    : [];
+  const accounts = [...claudeAccounts, ...codexAccounts];
+  // Codex is display-only. Slack events and subscriptions remain Claude-only.
+  const usageEvents = usageEventDetector.detect(claudeAccounts);
   const notificationDispatcher = createNotificationDispatcher(config);
   const snapshot = {
     timestamp: Date.now(),
@@ -613,8 +639,13 @@ async function refreshUsage() {
       .filter((a) => a.status === "ok")
       .map((a) => ({
         label: a.label,
-        fiveHour: a.fiveHour.utilization,
-        sevenDay: a.sevenDay.utilization,
+        provider: a.provider,
+        windows: a.usageWindows.map((window) => ({
+          key: window.key,
+          label: window.label,
+          utilization: window.utilization,
+          durationMins: window.durationMins,
+        })),
       })),
   };
   appendHistory(snapshot);
@@ -764,7 +795,7 @@ app.post("/api/logout", requireAuth, (req, res) => {
 // GET /api/usage — always returns 200; returns empty accounts while first fetch is in progress
 app.get("/api/usage", requireAuth, (req, res) => {
   const config = loadConfig();
-  const accountLabels = config.accounts.map((account) => account.label);
+  const accountLabels = (config.accounts || []).map((account) => account.label);
   const slackEnabled = isSlackEnabled(config);
   if (!cachedUsage) {
     res.json({
@@ -847,10 +878,21 @@ app.get("/api/history", requireAuth, (req, res) => {
 
   // Filter to only accounts currently in config.json
   const config = loadConfig();
-  const activeLabels = new Set(config.accounts.map((a) => a.label));
+  const activeLabels = new Set([
+    ...(config.accounts || []).map((account) => account.label),
+  ]);
+  const activeCodexLabels = new Set(
+    config.codex?.enabled
+      ? (cachedUsage?.accounts || [])
+          .filter((account) => account.provider === "codex")
+          .map((account) => account.label)
+      : []
+  );
   const filtered = history.map((snap) => ({
     ...snap,
-    accounts: snap.accounts.filter((a) => activeLabels.has(a.label)),
+    accounts: snap.accounts.filter((a) => (
+      a.provider === "codex" ? activeCodexLabels.has(a.label) : activeLabels.has(a.label)
+    )),
   }));
 
   res.json(filtered);
@@ -867,7 +909,7 @@ async function startServer() {
   await validateSlackConfig(config);
 
   app.listen(PORT, HOST, () => {
-    console.log(`Claude Status Dashboard running at http://${HOST}:${PORT}`);
+    console.log(`Claude & Codex Usage Dashboard running at http://${HOST}:${PORT}`);
     // Initial fetch
     refreshUsage().catch(console.error);
     refreshSlackUsers();

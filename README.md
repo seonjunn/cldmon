@@ -1,12 +1,13 @@
-# cldmon — Claude Usage Monitor
+# cldmon — Claude and Codex Usage Monitor
 
-A self-hosted dashboard that tracks Claude subscription usage (5-hour and 7-day utilization) across multiple accounts, with history charts.
+A self-hosted dashboard that tracks Claude and Codex subscription usage across multiple accounts, with history charts.
 
 ## Prerequisites
 
 - **Node.js** v18+ (`node --version`)
 - **npm** v8+ (bundled with Node)
 - A valid `claude.ai` session key for each account you want to monitor
+- CCS installed with the Codex accounts you want to monitor registered
 
 ### Getting your session key
 
@@ -46,6 +47,10 @@ Edit `config.json`:
       "botToken": "xoxb-...",
       "memberChannelId": "C0123456789"
     }
+  },
+  "codex": {
+    "enabled": true,
+    "ccsCommand": "ccs"
   },
   "accounts": [
     { "label": "alice", "sessionKey": "sk-ant-sid02-..." },
@@ -125,7 +130,11 @@ History is stored as daily JSONL files (`data/history-YYYY-MM-DD.jsonl`, one JSO
 | `notifications.slack.enabled` | `false` | Enables Slack delivery for reset events. |
 | `notifications.slack.botToken` | `""` | Slack bot token (`xoxb-...`) with permission to post to user App Home or DM targets. |
 | `notifications.slack.memberChannelId` | `""` | Optional Slack channel ID used to limit login autocomplete to members of that channel. Leave empty to search the whole workspace. |
+| `codex.enabled` | `false` | Show all Codex accounts registered in CCS on the website. Codex remains excluded from Slack notifications. |
+| `codex.ccsCommand` | `ccs` | CCS executable used to locate its installed account and quota modules. |
 | `accounts` | `[]` | List of `{ label, sessionKey }` objects. |
+
+Codex quota windows are rendered from the durations returned by Codex. Plans without a five-hour limit show only their weekly limit. Codex accounts do not participate in Slack notifications.
 
 ## Slack reset notifications
 
